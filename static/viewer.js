@@ -219,8 +219,8 @@ class MatchViewer {
             const positions = await resp.json();
             
             if (positions.length > 0) {
-                // Ne pas afficher les positions où is_player_air == 1 sauf si is_poi
-                const filtered = positions.filter(pos => (!pos.is_player_air || pos.is_poi) && pos.type !== 'aircraft');
+                const filtered = positions.filter(pos => pos.is_player_air == false);
+
                 // Separate POIs from regular positions
                 for (const pos of filtered) {
                     if (pos.is_poi) {
@@ -229,16 +229,19 @@ class MatchViewer {
                         this.positions.push(pos);
                     }
                 }
+
                 // Update last timestamp
                 const maxTs = Math.max(...filtered.map(p => p.timestamp));
                 if (maxTs > this.lastTimestamp) {
                     this.lastTimestamp = maxTs + 0.001; // Small offset to avoid duplicates
                 }
+
                 // Update max timestamp for timeline
                 if (maxTs > this.maxTimestamp) {
                     this.maxTimestamp = maxTs;
                     this._updateTimelineMax();
                 }
+
                 this._render();
             }
             this._updateStats();

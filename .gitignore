@@ -1,0 +1,12 @@
+/data/
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+logs/
+*.log
+.idea/
+.vscode/
+*.sqlite3
+coverage/

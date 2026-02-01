@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if is_live %}Live Match{% else %}Match {{ match.id }}{% endif %} - WT Plotter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <header class="header">
+        <h1>WT Plotter</h1>
+        <nav>
+            <a href="/">Matches</a>
+            <a href="/live">Live</a>
+        </nav>
+    </header>
+    
+    <div class="container">
+        <div class="match-header">
+            <div>
+                <h2>
+                    {% if is_live %}Live Match{% else %}Match #{{ match.id }}{% endif %}
+                    {% if is_live %}<span id="live-badge" class="badge live">LIVE</span>{% endif %}
+                </h2>
+                <div class="match-meta">
+                    <div>Started: {{ match.started_at | dt }}</div>
+                    {% if match.ended_at %}
+                    <div>Ended: {{ match.ended_at | dt }}</div>
+                    {% endif %}
+                    <div>Map: {{ match.map_name or 'Unknown' }}</div>
+                </div>
+            </div>
+            <a href="/" class="btn btn-secondary">&larr; Back</a>
+        </div>
+        
+        <div class="viewer-container">
+            <div class="canvas-wrapper">
+                <canvas id="mapCanvas"></canvas>
+            </div>
+            
+            <div class="sidebar">
+                <div class="panel">
+                    <h3>Statistics</h3>
+                    <div id="stats">Loading...</div>
+                </div>
+                
+                <div class="panel">
+                    <h3>Zoom</h3>
+                    <div class="zoom-controls">
+                        <button class="btn btn-secondary" onclick="viewer.zoomOut()">−</button>
+                        <span id="zoom-level">100%</span>
+                        <button class="btn btn-secondary" onclick="viewer.zoomIn()">+</button>
+                        <button class="btn btn-secondary" onclick="viewer.resetView()">Reset</button>
+                    </div>
+                    <p class="hint">Scroll to zoom, drag to pan, double-click to reset</p>
+                </div>
+                
+                {% if not is_live %}
+                <div class="panel">
+                    <h3>Timeline</h3>
+                    <div class="timeline-controls">
+                        <input type="range" id="timeline-slider" min="0" max="100" value="100" class="timeline-slider">
+                        <div class="timeline-display">
+                            <span id="timeline-current">--:--</span>
+                            <span>/</span>
+                            <span id="timeline-max">--:--</span>
+                        </div>
+                    </div>
+                    <p class="hint">Drag to replay match progression</p>
+                </div>
+                {% endif %}
+                
+                <div class="panel">
+                    <h3>Filters</h3>
+                    <div class="filter-list">
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-player" checked>
+                            <label for="filter-player">
+                                <span class="color-dot" style="background: #faC81E;"></span>
+                                You (Player)
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-squad" checked>
+                            <label for="filter-squad">
+                                <span class="color-dot" style="background: #67D756;"></span>
+                                Squad
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-ally" checked>
+                            <label for="filter-ally">
+                                <span class="color-dot" style="background: #174DFF;"></span>
+                                Allies (Blue)
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-enemy" checked>
+                            <label for="filter-enemy">
+                                <span class="color-dot" style="background: #fa0C00;"></span>
+                                Enemies (Red)
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-capture_zone" checked>
+                            <label for="filter-capture_zone">
+                                <span class="color-dot" style="background: #ffffff;"></span>
+                                Capture Zones
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-respawn" checked>
+                            <label for="filter-respawn">
+                                <span class="color-dot" style="background: #888888;"></span>
+                                Respawns
+                            </label>
+                        </div>
+                        <div class="filter-item">
+                            <input type="checkbox" id="filter-other" checked>
+                            <label for="filter-other">
+                                <span class="color-dot" style="background: #888888;"></span>
+                                Other
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="blip-size-control">
+                        <label for="blip-size">Blip Size</label>
+                        <input type="range" id="blip-size" min="0.5" max="3" step="0.25" value="1.5" class="blip-size-slider">
+                        <span id="blip-size-value">1.5</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='viewer.js') }}"></script>
+    <script>
+        const viewer = new MatchViewer('mapCanvas', {{ match.id }}, {
+            isLive: {{ 'true' if is_live else 'false' }},
+            pollInterval: 500  // 0.5 second
+        });
+        
+        // Setup filter handlers
+        const filters = ['player', 'squad', 'ally', 'enemy', 'capture_zone', 'respawn', 'other'];
+        filters.forEach(f => {
+            const checkbox = document.getElementById('filter-' + f);
+            if (checkbox) {
+                checkbox.addEventListener('change', () => {
+                    viewer.setFilter(f, checkbox.checked);
+                });
+            }
+        });
+        
+        // Setup blip size slider
+        const blipSizeSlider = document.getElementById('blip-size');
+        const blipSizeValue = document.getElementById('blip-size-value');
+        blipSizeSlider.addEventListener('input', () => {
+            const size = blipSizeSlider.value;
+            viewer.setBlipSize(size);
+            blipSizeValue.textContent = size;
+        });
+        
+        // Setup timeline slider (only for recorded matches)
+        {% if not is_live %}
+        const timelineSlider = document.getElementById('timeline-slider');
+        const timelineCurrent = document.getElementById('timeline-current');
+        const timelineMax = document.getElementById('timeline-max');
+        
+        function updateTimelineDisplay() {
+            const max = viewer.getTimelineMax();
+            const current = max * (timelineSlider.value / 100);
+            timelineCurrent.textContent = viewer.formatTime(current);
+            timelineMax.textContent = viewer.formatTime(max);
+        }
+        
+        timelineSlider.addEventListener('input', () => {
+            viewer.setTimeline(timelineSlider.value / 100);
+            updateTimelineDisplay();
+        });
+        
+        // Update timeline display after positions load
+        const originalRender = viewer._render.bind(viewer);
+        viewer._render = function() {
+            originalRender();
+            updateTimelineDisplay();
+        };
+        {% endif %}
+    </script>
+</body>
+</html>

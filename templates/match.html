@@ -28,6 +28,9 @@
                     <div>Ended: {{ match.ended_at | dt }}</div>
                     {% endif %}
                     <div>Map: {{ match.map_name or 'Unknown' }}</div>
+                    {% if match.air_map_name %}
+                    <div>Air map: {{ match.air_map_name }}</div>
+                    {% endif %}
                 </div>
             </div>
             <a href="/" class="btn btn-secondary">&larr; Back</a>

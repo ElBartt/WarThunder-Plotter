@@ -41,7 +41,7 @@ Puis ouvrir http://127.0.0.1:5000/live pour suivre la partie en direct.
 ## Organisation des données
 
 - `data/matches.db` : base SQLite (matches + positions)
-- `data/matches/<match_id>/map.png` : image de la map au début de la partie
+- `data/maps/<map_id>.png` : image de la map (stockée une seule fois)
 
 ## Extraction des minimaps et generation des hash
 
@@ -72,3 +72,4 @@ Le fichier `map_hashes.generated.py` peut ensuite remplacer `map_hashes.py`.
 
 - L’outil ne lit pas les replays : il enregistre les positions live via l’API locale War Thunder (localhost:8111), puis permet de revoir les chemins plus tard.
 - Le regroupement par map tient compte du mode.
+- Quand le joueur passe en air pendant une partie sol/mer, la map air est enregistree en metadonnees secondaires.

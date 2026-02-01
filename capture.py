@@ -10,13 +10,13 @@ import json
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable, List, Dict, Any
+from typing import Optional, Callable, List, Dict, Any, Tuple
 import requests
 import aiohttp
 from requests.adapters import HTTPAdapter
 
-from . import db
-from .map_hashes import lookup_map_name
+import db
+from map_hashes import lookup_map_info, BattleType, MapInfo
 
 # =============================================================================
 # FEATURE FLAGS
@@ -26,6 +26,7 @@ SAVE_RAW_DATA = False  # Set to True to save raw API responses for debugging
 
 # Raw data folder for debug
 RAW_DATA_DIR = Path(__file__).parent / "data" / "raw"
+MAPS_DIR = Path(__file__).parent / "data" / "maps"
 
 # API endpoints (same as WT-Plotter)
 BASE_URL = "http://localhost:8111"
@@ -61,6 +62,8 @@ class Capturer:
         self.has_map_image = False  # Key state: True = in match
         self.match_end_grace_start: Optional[float] = None  # When match first became invalid
         self.current_map_hash: str = ""  # Current map hash for change detection
+        self.current_map_info: Optional[MapInfo] = None
+        self.current_air_map_hash: str = ""
         
         # Current live state (for UI feedback)
         self.current_army_type: str = 'tank'
@@ -142,8 +145,8 @@ class Capturer:
             # Check if this is actually a new match (map changed) or grace period handling
             current_map_hash = self._get_current_map_hash()
             if current_map_hash:
-                map_name = lookup_map_name(current_map_hash)
-                if map_name == "No Map":
+                map_info = lookup_map_info(current_map_hash)
+                if map_info.display_name == "No Map" or map_info.map_id == "no_map":
                     # Map changed to "No Map" - match has ended
                     logger.info("Map changed to 'No Map', ending match")
                     self._end_match()
@@ -225,6 +228,9 @@ class Capturer:
         map_hash = ""
         map_image = None
         map_name = "Unknown Map"
+        map_id = None
+        battle_type = None
+        map_info: Optional[MapInfo] = None
         
         # Capture initial map_info for raw data
         try:
@@ -246,22 +252,32 @@ class Capturer:
             if resp.status_code == 200:
                 map_image = resp.content
                 map_hash = self._compute_dhash(map_image)
-                # Use dhash lookup to get readable map name (like WT-Plotter)
-                map_name = lookup_map_name(map_hash)
+                # Use dhash lookup to get readable map metadata (like WT-Plotter)
+                map_info = lookup_map_info(map_hash)
+                map_name = map_info.display_name
+                map_id = map_info.map_id
+                battle_type = map_info.battle_type.value
                 logger.info(f"Map hash: {map_hash} ({len(map_hash)} chars) -> {map_name}")
         except Exception as e:
             logger.warning(f"Failed to get map image: {e}")
+
+        if map_image:
+            self._save_map_image(map_image, map_id, map_hash)
         
         # Create match in database
         self.current_match_id = db.start_match(
             self.conn,
             map_hash=map_hash,
             map_name=map_name,
-            map_image=map_image
+            map_id=map_id,
+            battle_type=battle_type,
+            map_image=None
         )
         
         # Store current map hash for change detection
         self.current_map_hash = map_hash
+        self.current_map_info = map_info
+        self.current_air_map_hash = ""
         
         if self.on_match_start:
             self.on_match_start(self.current_match_id)
@@ -296,6 +312,8 @@ class Capturer:
         self.has_map_image = False  # Key: prevents new match until valid=true again
         self.match_end_grace_start = None  # Reset grace period
         self.current_map_hash = ""  # Reset map hash
+        self.current_map_info = None
+        self.current_air_map_hash = ""
         self.raw_data = []
     
     def _capture_positions_with_data(self, indicators_data: Optional[Dict[str, Any]], map_obj_data: Optional[List[Dict[str, Any]]]):
@@ -316,6 +334,8 @@ class Capturer:
             
             self.current_army_type = army_type or 'tank'
             self.current_vehicle_type = vehicle_type or ''
+
+            self._maybe_capture_air_map(army_type)
             
             # Use pre-fetched map_obj data
             if not map_obj_data:
@@ -395,6 +415,62 @@ class Capturer:
             logger.debug("Finished capturing positions")
         except Exception as e:
             logger.warning(f"Failed to capture positions: {e}")
+
+    def _maybe_capture_air_map(self, army_type: Optional[str]):
+        if not self.current_match_id or not self.current_map_info:
+            return
+        if army_type != 'air':
+            return
+        if self.current_air_map_hash:
+            return
+        if self.current_map_info.battle_type == BattleType.AIR:
+            return
+
+        map_image, map_hash = self._get_current_map_image_and_hash()
+        if not map_hash:
+            return
+        if map_hash == self.current_map_hash:
+            return
+
+        air_info = lookup_map_info(map_hash)
+        if map_image:
+            self._save_map_image(map_image, air_info.map_id, map_hash)
+
+        db.update_match_air_map(
+            self.conn,
+            self.current_match_id,
+            air_map_hash=map_hash,
+            air_map_name=air_info.display_name,
+            air_map_id=air_info.map_id,
+            air_battle_type=air_info.battle_type.value
+        )
+        self.current_air_map_hash = map_hash
+
+    def _save_map_image(self, map_image: bytes, map_id: Optional[str], map_hash: Optional[str]):
+        if not map_image:
+            return
+        if map_id in (None, "", "unknown", "no_map"):
+            map_key = map_hash or "unknown_map"
+        else:
+            map_key = map_id
+        MAPS_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = MAPS_DIR / f"{map_key}.png"
+        if file_path.exists():
+            return
+        try:
+            file_path.write_bytes(map_image)
+        except Exception as e:
+            logger.warning(f"Failed to save map image to disk: {e}")
+
+    def _get_current_map_image_and_hash(self) -> Tuple[Optional[bytes], Optional[str]]:
+        try:
+            resp = self.session.get(MAP_IMG_URL, timeout=1.0)
+            if resp.status_code == 200:
+                map_image = resp.content
+                return map_image, self._compute_dhash(map_image)
+        except Exception as e:
+            logger.debug(f"Failed to get current map image: {e}")
+        return None, None
     
     def _compute_dhash(self, image_data: bytes, size: int = 16) -> str:
         """
@@ -443,14 +519,8 @@ class Capturer:
 
     def _get_current_map_hash(self) -> Optional[str]:
         """Get current map hash for change detection during grace period."""
-        try:
-            resp = self.session.get(MAP_IMG_URL, timeout=1.0)
-            if resp.status_code == 200:
-                map_image = resp.content
-                return self._compute_dhash(map_image)
-        except Exception as e:
-            logger.debug(f"Failed to get current map hash: {e}")
-        return None
+        _, map_hash = self._get_current_map_image_and_hash()
+        return map_hash
     
     def _save_raw_data(self):
         """Save collected raw data to JSON file for debugging."""

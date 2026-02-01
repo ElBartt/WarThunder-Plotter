@@ -9,14 +9,8 @@ from datetime import datetime
 from flask import Flask, render_template, jsonify, Response, request
 import click
 
-# Support both direct execution and module import
-if __name__ == '__main__' or __package__ is None:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    import offline_plotter.db as db
-    import offline_plotter.capture as capture
-else:
-    from . import db
-    from . import capture
+import db
+import capture
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +18,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MAPS_DIR = Path(__file__).parent / "data" / "maps"
 
 def create_app():
     """Create Flask application."""
@@ -96,6 +91,9 @@ def create_app():
             'started_at': m.started_at,
             'ended_at': m.ended_at,
             'map_name': m.map_name,
+            'map_id': getattr(m, 'map_id', None),
+            'battle_type': getattr(m, 'battle_type', None),
+            'air_map_name': getattr(m, 'air_map_name', None),
             'position_count': db.get_positions_count(conn, m.id)
         } for m in matches])
     
@@ -110,7 +108,13 @@ def create_app():
             'started_at': match.started_at,
             'ended_at': match.ended_at,
             'map_name': match.map_name,
-            'map_hash': match.map_hash
+            'map_hash': match.map_hash,
+            'map_id': getattr(match, 'map_id', None),
+            'battle_type': getattr(match, 'battle_type', None),
+            'air_map_hash': getattr(match, 'air_map_hash', None),
+            'air_map_id': getattr(match, 'air_map_id', None),
+            'air_map_name': getattr(match, 'air_map_name', None),
+            'air_battle_type': getattr(match, 'air_battle_type', None)
         })
     
     @app.route('/api/match/<int:match_id>/positions')
@@ -137,9 +141,19 @@ def create_app():
     def api_map_image(match_id: int):
         """Get the map image for a match."""
         match = db.get_match(conn, match_id)
-        if not match or not match.map_image:
+        if not match:
             return '', 404
-        return Response(match.map_image, mimetype='image/png')
+        map_id = getattr(match, 'map_id', None)
+        if map_id in (None, '', 'unknown', 'no_map'):
+            map_key = match.map_hash
+        else:
+            map_key = map_id
+        if not map_key:
+            return '', 404
+        map_path = MAPS_DIR / f"{map_key}.png"
+        if not map_path.exists():
+            return '', 404
+        return Response(map_path.read_bytes(), mimetype='image/png')
     
     @app.route('/api/active')
     def api_active():
@@ -250,16 +264,13 @@ def watch(port: int, host: str):
         regular = [p for p in positions if not p.get('is_poi')]
         if regular:
             logger.info(f"Match {match_id}: +{len(regular)} positions")
-    
-    # Ensure the global capturer singleton is used everywhere
-    from offline_plotter import capture as capture_mod
-    capturer = capture_mod.Capturer(
+
+    capturer = capture.Capturer(
         on_match_start=on_start,
         on_match_end=on_end,
         on_position=on_position
     )
-    # Set as global singleton
-    capture_mod._capturer = capturer
+    
     capturer.start()
     
     app = create_app()

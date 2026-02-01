@@ -21,7 +21,13 @@ class Match:
     ended_at: Optional[str]
     map_hash: str
     map_name: str
-    map_image: Optional[bytes]
+    map_id: Optional[str] = None
+    battle_type: Optional[str] = None
+    air_map_hash: Optional[str] = None
+    air_map_id: Optional[str] = None
+    air_map_name: Optional[str] = None
+    air_battle_type: Optional[str] = None
+    map_image: Optional[bytes] = None
 
 
 @dataclass
@@ -60,6 +66,12 @@ def _create_tables(conn: sqlite3.Connection):
             ended_at TEXT,
             map_hash TEXT,
             map_name TEXT,
+            map_id TEXT,
+            battle_type TEXT,
+            air_map_hash TEXT,
+            air_map_id TEXT,
+            air_map_name TEXT,
+            air_battle_type TEXT,
             map_image BLOB
         );
         
@@ -117,14 +129,76 @@ def _create_tables(conn: sqlite3.Connection):
     except sqlite3.OperationalError:
         pass  # Column already exists
 
-def start_match(conn: sqlite3.Connection, map_hash: str = "", map_name: str = "", map_image: bytes = None) -> int:
+    # Migrations for matches table metadata
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN map_id TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN battle_type TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_map_hash TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_map_id TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_map_name TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_battle_type TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+def start_match(
+    conn: sqlite3.Connection,
+    map_hash: str = "",
+    map_name: str = "",
+    map_id: Optional[str] = None,
+    battle_type: Optional[str] = None,
+    map_image: bytes = None
+) -> int:
     """Start a new match, returns match ID."""
     cur = conn.execute(
-        "INSERT INTO matches (started_at, map_hash, map_name, map_image) VALUES (?, ?, ?, ?)",
-        (datetime.now().isoformat(), map_hash, map_name, map_image)
+        """INSERT INTO matches
+           (started_at, map_hash, map_name, map_id, battle_type, map_image)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), map_hash, map_name, map_id, battle_type, map_image)
     )
     conn.commit()
     return cur.lastrowid
+
+
+def update_match_air_map(
+    conn: sqlite3.Connection,
+    match_id: int,
+    air_map_hash: str,
+    air_map_name: str,
+    air_map_id: Optional[str] = None,
+    air_battle_type: Optional[str] = None
+):
+    """Update air map metadata for a match."""
+    conn.execute(
+        """UPDATE matches
+           SET air_map_hash = ?,
+               air_map_name = ?,
+               air_map_id = ?,
+               air_battle_type = ?
+           WHERE id = ?""",
+        (air_map_hash, air_map_name, air_map_id, air_battle_type, match_id)
+    )
+    conn.commit()
 
 
 def end_match(conn: sqlite3.Connection, match_id: int):

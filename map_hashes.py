@@ -321,13 +321,13 @@ def lookup_map_info(dhash: str, context: Optional[str] = None) -> MapInfo:
 
     # Try to find closest match (hamming distance)
     # This helps with slight image variations
-    default_tolerance = 42
-    snow_tolerance = 2
+    tolerance = 42
     best_match = None
     best_distance = float('inf')
     closest_distance = float('inf')
     closest_hash = None
     closest_map_id = None
+    closest_info = None
 
     for known_hash, info in ALL_MAPS.items():
         distance = _hamming_distance(dhash, known_hash)
@@ -335,11 +335,12 @@ def lookup_map_info(dhash: str, context: Optional[str] = None) -> MapInfo:
             closest_distance = distance
             closest_hash = known_hash
             closest_map_id = info.map_id
-        is_snow_variant = "snow" in info.map_id or "snow" in info.display_name.lower()
-        tolerance = snow_tolerance if is_snow_variant else default_tolerance
-        if distance < best_distance and distance <= tolerance:
-            best_distance = distance
-            best_match = info
+            closest_info = info
+
+    if closest_info is not None:
+        if closest_distance <= tolerance:
+            best_distance = closest_distance
+            best_match = closest_info
 
     if best_match:
         logger.info(

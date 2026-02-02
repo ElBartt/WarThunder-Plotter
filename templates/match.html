@@ -31,6 +31,12 @@
                     {% if match.air_map_name %}
                     <div>Air map: {{ match.air_map_name }}</div>
                     {% endif %}
+                    {% if match.initial_capture_count is not none %}
+                    <div>Initial capture zones: {{ match.initial_capture_count }}</div>
+                    {% endif %}
+                    {% if match.initial_capture_x is not none and match.initial_capture_y is not none %}
+                    <div>Capture barycenter: {{ '%.4f'|format(match.initial_capture_x) }}, {{ '%.4f'|format(match.initial_capture_y) }}</div>
+                    {% endif %}
                 </div>
             </div>
             <a href="/" class="btn btn-secondary">&larr; Back</a>

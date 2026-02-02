@@ -67,6 +67,7 @@ class Capturer:
         self.current_air_map_hash: str = ""
         self._last_poi_signature: Optional[Tuple[Tuple[Any, ...], ...]] = None
         self.current_match_nuke_detected = False
+        self.initial_capture_set = False
         
         # Current live state (for UI feedback)
         self.current_army_type: str = 'tank'
@@ -294,6 +295,7 @@ class Capturer:
         self.current_air_map_hash = ""
         self._last_poi_signature = None
         self.current_match_nuke_detected = False
+        self.initial_capture_set = False
         
         if self.on_match_start:
             self.on_match_start(self.current_match_id)
@@ -333,6 +335,7 @@ class Capturer:
         self._last_poi_signature = None
         self.raw_data = []
         self.current_match_nuke_detected = False
+        self.initial_capture_set = False
     
     def _capture_positions_with_data(self, indicators_data: Optional[Dict[str, Any]], map_obj_data: Optional[List[Dict[str, Any]]]):
         """Capture current positions using pre-fetched data."""
@@ -364,6 +367,7 @@ class Capturer:
             # Detect air-view signals (AirDefence icon or POI changes)
             poi_types = ('capture_zone',)
             poi_signature_list: List[Tuple[Any, ...]] = []
+            capture_zone_positions: List[Tuple[float, float]] = []
             airdefence_seen = False
             for obj in objects:
                 x = obj.get('x', -1)
@@ -376,6 +380,8 @@ class Capturer:
                 obj_type = obj.get('type', 'unknown')
                 if obj_type in poi_types:
                     poi_signature_list.append((obj_type, round(x, 4), round(y, 4)))
+                if obj_type == 'capture_zone':
+                    capture_zone_positions.append((x, y))
 
             poi_signature_list.sort()
             poi_signature = tuple(poi_signature_list)
@@ -383,6 +389,24 @@ class Capturer:
             if self._last_poi_signature is not None and poi_signature != self._last_poi_signature:
                 poi_changed = True
             self._last_poi_signature = poi_signature
+
+            if not self.initial_capture_set and capture_zone_positions:
+                count = len(capture_zone_positions)
+                sum_x = sum(p[0] for p in capture_zone_positions)
+                sum_y = sum(p[1] for p in capture_zone_positions)
+                avg_x = sum_x / count
+                avg_y = sum_y / count
+                try:
+                    db.update_match_initial_capture(
+                        self.conn,
+                        self.current_match_id,
+                        initial_capture_count=count,
+                        initial_capture_x=avg_x,
+                        initial_capture_y=avg_y
+                    )
+                    self.initial_capture_set = True
+                except Exception as e:
+                    logger.warning(f"Failed to store initial capture zones: {e}")
             
             timestamp = time.time() - self.match_start_time
             

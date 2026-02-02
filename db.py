@@ -27,6 +27,9 @@ class Match:
     air_map_id: Optional[str] = None
     air_map_name: Optional[str] = None
     air_battle_type: Optional[str] = None
+    initial_capture_count: Optional[int] = None
+    initial_capture_x: Optional[float] = None
+    initial_capture_y: Optional[float] = None
     nuke_detected: int = 0
     map_image: Optional[bytes] = None
 
@@ -74,6 +77,9 @@ def _create_tables(conn: sqlite3.Connection):
             air_map_id TEXT,
             air_map_name TEXT,
             air_battle_type TEXT,
+            initial_capture_count INTEGER,
+            initial_capture_x REAL,
+            initial_capture_y REAL,
             nuke_detected INTEGER NOT NULL DEFAULT 0,
             map_image BLOB
         );
@@ -171,6 +177,21 @@ def _create_tables(conn: sqlite3.Connection):
     except sqlite3.OperationalError:
         pass  # Column already exists
     try:
+        conn.execute("ALTER TABLE matches ADD COLUMN initial_capture_count INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN initial_capture_x REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN initial_capture_y REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
         conn.execute("ALTER TABLE matches ADD COLUMN nuke_detected INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
@@ -231,6 +252,25 @@ def update_match_nuke(conn: sqlite3.Connection, match_id: int, nuke_detected: in
     conn.execute(
         "UPDATE matches SET nuke_detected = ? WHERE id = ?",
         (nuke_detected, match_id)
+    )
+    conn.commit()
+
+
+def update_match_initial_capture(
+    conn: sqlite3.Connection,
+    match_id: int,
+    initial_capture_count: int,
+    initial_capture_x: float,
+    initial_capture_y: float
+):
+    """Store initial capture-zone count and barycenter for a match."""
+    conn.execute(
+        """UPDATE matches
+           SET initial_capture_count = ?,
+               initial_capture_x = ?,
+               initial_capture_y = ?
+           WHERE id = ?""",
+        (initial_capture_count, initial_capture_x, initial_capture_y, match_id)
     )
     conn.commit()
 

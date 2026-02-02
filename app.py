@@ -52,12 +52,24 @@ def create_app():
         # Add position counts
         match_data = []
         for m in matches:
+            duration_seconds = None
+            if m.started_at:
+                try:
+                    start_dt = datetime.fromisoformat(m.started_at)
+                    end_dt = datetime.fromisoformat(m.ended_at) if m.ended_at else datetime.now()
+                    duration_seconds = max(0, int((end_dt - start_dt).total_seconds()))
+                except Exception:
+                    duration_seconds = None
             count = db.get_positions_count(conn, m.id)
             match_data.append({
                 'id': m.id,
                 'started_at': m.started_at,
                 'ended_at': m.ended_at,
                 'map_name': m.map_name or 'Unknown',
+                'air_map_name': getattr(m, 'air_map_name', None),
+                'nuke_detected': getattr(m, 'nuke_detected', 0),
+                'initial_capture_count': getattr(m, 'initial_capture_count', None),
+                'duration_seconds': duration_seconds,
                 'position_count': count,
                 'is_active': m.ended_at is None
             })
@@ -95,6 +107,9 @@ def create_app():
             'battle_type': getattr(m, 'battle_type', None),
             'air_map_name': getattr(m, 'air_map_name', None),
             'nuke_detected': getattr(m, 'nuke_detected', 0),
+            'initial_capture_count': getattr(m, 'initial_capture_count', None),
+            'initial_capture_x': getattr(m, 'initial_capture_x', None),
+            'initial_capture_y': getattr(m, 'initial_capture_y', None),
             'position_count': db.get_positions_count(conn, m.id)
         } for m in matches])
     
@@ -116,7 +131,10 @@ def create_app():
             'air_map_id': getattr(match, 'air_map_id', None),
             'air_map_name': getattr(match, 'air_map_name', None),
             'air_battle_type': getattr(match, 'air_battle_type', None),
-            'nuke_detected': getattr(match, 'nuke_detected', 0)
+            'nuke_detected': getattr(match, 'nuke_detected', 0),
+            'initial_capture_count': getattr(match, 'initial_capture_count', None),
+            'initial_capture_x': getattr(match, 'initial_capture_x', None),
+            'initial_capture_y': getattr(match, 'initial_capture_y', None)
         })
     
     @app.route('/api/match/<int:match_id>/positions')

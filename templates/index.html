@@ -24,8 +24,22 @@
             <div class="match-row">
                 <a href="/match/{{ match.id }}" class="match-item {% if match.is_active %}active{% endif %}">
                     <div class="match-info">
-                        <span class="match-time">{{ match.started_at | dt }}</span>
+                        <span class="match-time">
+                            {{ match.started_at | dt }}
+                            {% if match.duration_seconds is not none %}
+                            ({{ '%d:%02d'|format(match.duration_seconds // 60, match.duration_seconds % 60) }})
+                            {% endif %}
+                        </span>
                         <span class="match-map">{{ match.map_name }}</span>
+                        {% if match.air_map_name %}
+                        <span class="match-stats">Air map: {{ match.air_map_name }}</span>
+                        {% endif %}
+                        {% if match.initial_capture_count is not none %}
+                        <span class="match-stats">Capture zones: {{ match.initial_capture_count }}</span>
+                        {% endif %}
+                        {% if match.nuke_detected %}
+                        <span class="match-stats">Nuke</span>
+                        {% endif %}
                         <span class="match-stats">{{ match.position_count }} positions</span>
                     </div>
                     {% if match.is_active %}

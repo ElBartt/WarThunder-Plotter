@@ -8,6 +8,7 @@ import logging
 import hashlib
 import json
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Tuple
@@ -65,6 +66,7 @@ class Capturer:
         self.current_map_info: Optional[MapInfo] = None
         self.current_air_map_hash: str = ""
         self._last_poi_signature: Optional[Tuple[Tuple[Any, ...], ...]] = None
+        self.current_match_nuke_detected = False
         
         # Current live state (for UI feedback)
         self.current_army_type: str = 'tank'
@@ -149,16 +151,24 @@ class Capturer:
                 base_context = "ground"
                 if self.current_map_info:
                     base_context = self.current_map_info.battle_type.value
-                map_info = lookup_map_info(current_map_hash, context=base_context)
-                if map_info.display_name == "No Map" or map_info.map_id == "no_map":
+                hash_map_info = lookup_map_info(current_map_hash, context=base_context)
+                if hash_map_info.display_name == "No Map" or hash_map_info.map_id == "no_map":
                     # Map changed to "No Map" - match has ended
                     logger.info("Map changed to 'No Map', ending match")
                     self._end_match()
                 elif current_map_hash != self.current_map_hash:
-                    # Map changed! This is a new match, not a recovery
-                    logger.info(f"Map changed during grace period ({self.current_map_hash} -> {current_map_hash}), starting new match")
-                    self._end_match()  # End the old match
-                    self._start_match()  # Start new match immediately
+                    # Map changed during grace period - check for nuke (ground -> air switch)
+                    if self._is_nuke_map_switch(self.current_map_info, hash_map_info):
+                        logger.info(
+                            f"Nuke detected (map switch {self.current_map_hash} -> {current_map_hash}), keeping current match"
+                        )
+                        self._mark_match_nuke()
+                        self.match_end_grace_start = None
+                    else:
+                        # Map changed! This is a new match, not a recovery
+                        logger.info(f"Map changed during grace period ({self.current_map_hash} -> {current_map_hash}), starting new match")
+                        self._end_match()  # End the old match
+                        self._start_match()  # Start new match immediately
                 else:
                     # Same map, handle grace period
                     current_time = time.time()
@@ -283,6 +293,7 @@ class Capturer:
         self.current_map_info = map_info
         self.current_air_map_hash = ""
         self._last_poi_signature = None
+        self.current_match_nuke_detected = False
         
         if self.on_match_start:
             self.on_match_start(self.current_match_id)
@@ -321,6 +332,7 @@ class Capturer:
         self.current_air_map_hash = ""
         self._last_poi_signature = None
         self.raw_data = []
+        self.current_match_nuke_detected = False
     
     def _capture_positions_with_data(self, indicators_data: Optional[Dict[str, Any]], map_obj_data: Optional[List[Dict[str, Any]]]):
         """Capture current positions using pre-fetched data."""
@@ -575,6 +587,38 @@ class Capturer:
             logger.info(f"Raw data saved: {filepath}")
         except Exception as e:
             logger.warning(f"Failed to save raw data: {e}")
+
+    def _mark_match_nuke(self):
+        if not self.current_match_id:
+            return
+        if self.current_match_nuke_detected:
+            return
+        db.update_match_nuke(self.conn, self.current_match_id, 1)
+        self.current_match_nuke_detected = True
+
+    @staticmethod
+    def _normalize_map_name(name: Optional[str]) -> str:
+        if not name:
+            return ""
+        normalized = name.strip()
+        normalized = re.sub(r"^[^A-Za-z0-9]+", "", normalized)
+        return normalized.strip().lower()
+
+    def _get_map_base_name(self, info: Optional[MapInfo]) -> str:
+        if not info:
+            return ""
+        return self._normalize_map_name(info.display_name)
+
+    def _is_nuke_map_switch(self, previous: Optional[MapInfo], current: Optional[MapInfo]) -> bool:
+        if not previous or not current:
+            return False
+        if previous.battle_type not in (BattleType.GROUND, BattleType.NAVAL):
+            return False
+        if current.battle_type != BattleType.AIR:
+            return False
+        prev_name = self._get_map_base_name(previous)
+        curr_name = self._get_map_base_name(current)
+        return bool(prev_name) and prev_name == curr_name
 
 
 # Global capturer instance

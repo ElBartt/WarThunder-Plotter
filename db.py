@@ -27,6 +27,7 @@ class Match:
     air_map_id: Optional[str] = None
     air_map_name: Optional[str] = None
     air_battle_type: Optional[str] = None
+    nuke_detected: int = 0
     map_image: Optional[bytes] = None
 
 
@@ -73,6 +74,7 @@ def _create_tables(conn: sqlite3.Connection):
             air_map_id TEXT,
             air_map_name TEXT,
             air_battle_type TEXT,
+            nuke_detected INTEGER NOT NULL DEFAULT 0,
             map_image BLOB
         );
         
@@ -168,6 +170,11 @@ def _create_tables(conn: sqlite3.Connection):
         conn.commit()
     except sqlite3.OperationalError:
         pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN nuke_detected INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
 def start_match(
     conn: sqlite3.Connection,
@@ -175,14 +182,15 @@ def start_match(
     map_name: str = "",
     map_id: Optional[str] = None,
     battle_type: Optional[str] = None,
-    map_image: bytes = None
+    map_image: bytes = None,
+    nuke_detected: int = 0
 ) -> int:
     """Start a new match, returns match ID."""
     cur = conn.execute(
         """INSERT INTO matches
-           (started_at, map_hash, map_name, map_id, battle_type, map_image)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), map_hash, map_name, map_id, battle_type, map_image)
+           (started_at, map_hash, map_name, map_id, battle_type, nuke_detected, map_image)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), map_hash, map_name, map_id, battle_type, nuke_detected, map_image)
     )
     conn.commit()
     return cur.lastrowid
@@ -214,6 +222,15 @@ def end_match(conn: sqlite3.Connection, match_id: int):
     conn.execute(
         "UPDATE matches SET ended_at = ? WHERE id = ?",
         (datetime.now().isoformat(), match_id)
+    )
+    conn.commit()
+
+
+def update_match_nuke(conn: sqlite3.Connection, match_id: int, nuke_detected: int = 1):
+    """Mark a match as a nuke match."""
+    conn.execute(
+        "UPDATE matches SET nuke_detected = ? WHERE id = ?",
+        (nuke_detected, match_id)
     )
     conn.commit()
 

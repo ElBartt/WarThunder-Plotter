@@ -94,6 +94,7 @@ def create_app():
             'map_id': getattr(m, 'map_id', None),
             'battle_type': getattr(m, 'battle_type', None),
             'air_map_name': getattr(m, 'air_map_name', None),
+            'nuke_detected': getattr(m, 'nuke_detected', 0),
             'position_count': db.get_positions_count(conn, m.id)
         } for m in matches])
     
@@ -114,7 +115,8 @@ def create_app():
             'air_map_hash': getattr(match, 'air_map_hash', None),
             'air_map_id': getattr(match, 'air_map_id', None),
             'air_map_name': getattr(match, 'air_map_name', None),
-            'air_battle_type': getattr(match, 'air_battle_type', None)
+            'air_battle_type': getattr(match, 'air_battle_type', None),
+            'nuke_detected': getattr(match, 'nuke_detected', 0)
         })
     
     @app.route('/api/match/<int:match_id>/positions')

@@ -32,6 +32,11 @@ class Match:
     initial_capture_y: Optional[float] = None
     nuke_detected: int = 0
     map_image: Optional[bytes] = None
+    # Air view transformation parameters: x_air = a*x + b, y_air = c*y + d
+    air_transform_a: Optional[float] = None
+    air_transform_b: Optional[float] = None
+    air_transform_c: Optional[float] = None
+    air_transform_d: Optional[float] = None
 
 
 @dataclass
@@ -51,6 +56,8 @@ class Position:
     dy: Optional[float] = None
     is_player_air: int = 0  # 1 if position is from player's aircraft, else 0
     is_player_air_view: int = 0  # 1 if air-view conditions detected for this tick
+    x_ground: Optional[float] = None  # x converted back to ground reference frame
+    y_ground: Optional[float] = None  # y converted back to ground reference frame
 
 
 def get_connection() -> sqlite3.Connection:
@@ -100,6 +107,8 @@ def _create_tables(conn: sqlite3.Connection):
             vehicle_type TEXT NOT NULL DEFAULT '',
             is_player_air INTEGER NOT NULL DEFAULT 0,
             is_player_air_view INTEGER NOT NULL DEFAULT 0,
+            x_ground REAL,
+            y_ground REAL,
             FOREIGN KEY (match_id) REFERENCES matches(id)
         );
         
@@ -141,6 +150,19 @@ def _create_tables(conn: sqlite3.Connection):
     # Migration: add is_player_air_view column if missing
     try:
         conn.execute("ALTER TABLE positions ADD COLUMN is_player_air_view INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add x_ground column if missing
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN x_ground REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    # Migration: add y_ground column if missing
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN y_ground REAL")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # Column already exists
@@ -193,6 +215,28 @@ def _create_tables(conn: sqlite3.Connection):
         pass  # Column already exists
     try:
         conn.execute("ALTER TABLE matches ADD COLUMN nuke_detected INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # Migration: add air_transform columns if missing
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_transform_a REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_transform_b REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_transform_c REAL")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE matches ADD COLUMN air_transform_d REAL")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # Column already exists
@@ -275,14 +319,39 @@ def update_match_initial_capture(
     conn.commit()
 
 
+def update_match_air_transform(
+    conn: sqlite3.Connection,
+    match_id: int,
+    a: float,
+    b: float,
+    c: float,
+    d: float
+):
+    """Store air view transformation parameters for a match.
+    
+    The transformation is: x_air = a*x_ground + b, y_air = c*y_ground + d
+    To convert back: x_ground = (x_air - b) / a, y_ground = (y_air - d) / c
+    """
+    conn.execute(
+        """UPDATE matches
+           SET air_transform_a = ?,
+               air_transform_b = ?,
+               air_transform_c = ?,
+               air_transform_d = ?
+           WHERE id = ?""",
+        (a, b, c, d, match_id)
+    )
+    conn.commit()
+
+
 def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]):
     """Add multiple positions to a match."""
     if not positions:
         return
 
     conn.executemany(
-        """INSERT INTO positions (match_id, x, y, dx, dy, color, type, icon, timestamp, is_poi, army_type, vehicle_type, is_player_air, is_player_air_view)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO positions (match_id, x, y, dx, dy, color, type, icon, timestamp, is_poi, army_type, vehicle_type, is_player_air, is_player_air_view, x_ground, y_ground)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [(
             match_id,
             p['x'],
@@ -297,7 +366,9 @@ def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]
             p.get('army_type', 'tank'),
             p.get('vehicle_type', ''),
             p.get('is_player_air', 0),
-            p.get('is_player_air_view', 0)
+            p.get('is_player_air_view', 0),
+            p.get('x_ground'),
+            p.get('y_ground')
         ) for p in positions]
     )
     conn.commit()

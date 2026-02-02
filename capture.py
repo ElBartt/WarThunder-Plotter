@@ -15,6 +15,7 @@ from typing import Optional, Callable, List, Dict, Any, Tuple
 import requests
 import aiohttp
 from requests.adapters import HTTPAdapter
+import numpy as np
 
 import db
 from map_hashes import lookup_map_info, BattleType, MapInfo
@@ -68,6 +69,12 @@ class Capturer:
         self._last_poi_signature: Optional[Tuple[Tuple[Any, ...], ...]] = None
         self.current_match_nuke_detected = False
         self.initial_capture_set = False
+        
+        # Air view transformation detection
+        self._prev_tick_ground_objects: List[Dict[str, Any]] = []  # Previous tick's ground objects for matching
+        self._prev_tick_was_air_view = False  # Whether previous tick was in air view
+        self._air_transform_computed = False  # Whether transformation has been computed for this match
+        self._air_transform_params: Optional[Tuple[float, float, float, float]] = None  # (a, b, c, d)
         
         # Current live state (for UI feedback)
         self.current_army_type: str = 'tank'
@@ -296,6 +303,10 @@ class Capturer:
         self._last_poi_signature = None
         self.current_match_nuke_detected = False
         self.initial_capture_set = False
+        self._prev_tick_ground_objects = []
+        self._prev_tick_was_air_view = False
+        self._air_transform_computed = False
+        self._air_transform_params = None
         
         if self.on_match_start:
             self.on_match_start(self.current_match_id)
@@ -336,6 +347,10 @@ class Capturer:
         self.raw_data = []
         self.current_match_nuke_detected = False
         self.initial_capture_set = False
+        self._prev_tick_ground_objects = []
+        self._prev_tick_was_air_view = False
+        self._air_transform_computed = False
+        self._air_transform_params = None
     
     def _capture_positions_with_data(self, indicators_data: Optional[Dict[str, Any]], map_obj_data: Optional[List[Dict[str, Any]]]):
         """Capture current positions using pre-fetched data."""
@@ -410,6 +425,26 @@ class Capturer:
             
             timestamp = time.time() - self.match_start_time
             
+            # Determine if we're in air view for this tick
+            is_air_view_now = (army_type == 'air' or airdefence_seen or poi_changed)
+            
+            # Detect transition to air view and compute transformation
+            if is_air_view_now and not self._prev_tick_was_air_view and not self._air_transform_computed:
+                # Just transitioned into air view - try to compute transformation
+                if self._prev_tick_ground_objects and objects:
+                    transform = self._compute_air_transform(self._prev_tick_ground_objects, objects)
+                    if transform:
+                        self._air_transform_params = transform
+                        self._air_transform_computed = True
+                        # Store in database
+                        a, b, c, d = transform
+                        db.update_match_air_transform(self.conn, self.current_match_id, a, b, c, d)
+                        logger.info(f"Air transform stored for match {self.current_match_id}")
+            
+            # Update previous tick state
+            self._prev_tick_was_air_view = is_air_view_now
+            self._prev_tick_ground_objects = [o for o in objects if o.get('x', -1) > 0 and o.get('x', -1) < 1 and o.get('y', -1) > 0 and o.get('y', -1) < 1]
+            
             # Save raw data for debug
             if SAVE_RAW_DATA:
                 logger.debug("Saving raw map_obj.json data for debug")
@@ -459,8 +494,15 @@ class Capturer:
                     'army_type': army_type or 'tank',
                     'vehicle_type': vehicle_type or '',
                     'is_player_air': 1 if (army_type == 'air') else 0,
-                    'is_player_air_view': 1 if (army_type == 'air' or airdefence_seen or poi_changed) else 0
+                    'is_player_air_view': 1 if is_air_view_now else 0
                 }
+                
+                # If in air view and we have transform params, compute ground coordinates
+                if is_air_view_now and self._air_transform_params:
+                    x_ground, y_ground = self._apply_inverse_transform(x, y)
+                    pos['x_ground'] = x_ground
+                    pos['y_ground'] = y_ground
+                
                 # Ajout dx/dy si présents
                 if dx is not None:
                     pos['dx'] = dx
@@ -643,6 +685,119 @@ class Capturer:
         prev_name = self._get_map_base_name(previous)
         curr_name = self._get_map_base_name(current)
         return bool(prev_name) and prev_name == curr_name
+
+    def _compute_air_transform(
+        self,
+        prev_objects: List[Dict[str, Any]],
+        curr_objects: List[Dict[str, Any]]
+    ) -> Optional[Tuple[float, float, float, float]]:
+        """
+        Compute air view transformation parameters by matching ground objects between frames.
+        
+        Returns (a, b, c, d) where: x_air = a*x_ground + b, y_air = c*y_ground + d
+        Returns None if not enough matching points found.
+        """
+        # Filter to keep only ground objects (exclude player, airdefence, aircraft)
+        excluded_icons = {'player', 'Player', 'airdefence', 'air_defence', 'AirDefence'}
+        excluded_types = {'aircraft', 'airfield', 'respawn_base_fighter'}
+        
+        def is_ground_object(obj: Dict[str, Any]) -> bool:
+            icon = obj.get('icon', '')
+            obj_type = obj.get('type', '')
+            if icon in excluded_icons:
+                return False
+            if obj_type in excluded_types:
+                return False
+            # Only keep ground vehicles
+            return True
+        
+        prev_ground = [o for o in prev_objects if is_ground_object(o)]
+        curr_ground = [o for o in curr_objects if is_ground_object(o)]
+        
+        if len(prev_ground) < 3 or len(curr_ground) < 3:
+            logger.debug(f"Not enough ground objects for transform: prev={len(prev_ground)}, curr={len(curr_ground)}")
+            return None
+        
+        # Match objects by icon order (same order assumption)
+        # Group by icon to match objects with same icon
+        prev_by_icon: Dict[str, List[Dict[str, Any]]] = {}
+        for obj in prev_ground:
+            icon = obj.get('icon', 'unknown')
+            if icon not in prev_by_icon:
+                prev_by_icon[icon] = []
+            prev_by_icon[icon].append(obj)
+        
+        curr_by_icon: Dict[str, List[Dict[str, Any]]] = {}
+        for obj in curr_ground:
+            icon = obj.get('icon', 'unknown')
+            if icon not in curr_by_icon:
+                curr_by_icon[icon] = []
+            curr_by_icon[icon].append(obj)
+        
+        # Build matching pairs: same icon, same index in that icon's list
+        x1_list, y1_list, x2_list, y2_list = [], [], [], []
+        for icon, prev_list in prev_by_icon.items():
+            curr_list = curr_by_icon.get(icon, [])
+            for i, prev_obj in enumerate(prev_list):
+                if i < len(curr_list):
+                    curr_obj = curr_list[i]
+                    x1_list.append(prev_obj.get('x', 0))
+                    y1_list.append(prev_obj.get('y', 0))
+                    x2_list.append(curr_obj.get('x', 0))
+                    y2_list.append(curr_obj.get('y', 0))
+        
+        if len(x1_list) < 3:
+            logger.debug(f"Not enough matched objects for transform: {len(x1_list)}")
+            return None
+        
+        # Solve linear regression: x2 = a*x1 + b, y2 = c*y1 + d
+        x1 = np.array(x1_list)
+        y1 = np.array(y1_list)
+        x2 = np.array(x2_list)
+        y2 = np.array(y2_list)
+        
+        # For x: x2 = a*x1 + b
+        A_x = np.column_stack([x1, np.ones_like(x1)])
+        params_x, residuals_x, _, _ = np.linalg.lstsq(A_x, x2, rcond=None)
+        a, b = params_x
+        
+        # For y: y2 = c*y1 + d
+        A_y = np.column_stack([y1, np.ones_like(y1)])
+        params_y, residuals_y, _, _ = np.linalg.lstsq(A_y, y2, rcond=None)
+        c, d = params_y
+        
+        # Validate the transformation makes sense (positive scale factors around 0.06)
+        if a <= 0 or c <= 0:
+            logger.warning(f"Invalid transform scale factors: a={a}, c={c}")
+            return None
+        if a > 0.5 or c > 0.5:
+            # Scale too large, probably not a valid air view transformation
+            logger.debug(f"Transform scale too large (not air zoom): a={a}, c={c}")
+            return None
+        
+        # Compute error to validate
+        x2_pred = a * x1 + b
+        y2_pred = c * y1 + d
+        error_x = np.mean(np.abs(x2_pred - x2))
+        error_y = np.mean(np.abs(y2_pred - y2))
+        
+        if error_x > 0.01 or error_y > 0.01:
+            logger.warning(f"Transform error too high: err_x={error_x}, err_y={error_y}")
+            return None
+        
+        logger.info(f"Air transform computed: a={a:.6f}, b={b:.6f}, c={c:.6f}, d={d:.6f} (error: {error_x:.6f}, {error_y:.6f})")
+        return (a, b, c, d)
+
+    def _apply_inverse_transform(self, x: float, y: float) -> Tuple[float, float]:
+        """Convert air-view coordinates back to ground reference frame."""
+        if not self._air_transform_params:
+            return x, y
+        a, b, c, d = self._air_transform_params
+        if a == 0 or c == 0:
+            return x, y
+        x_ground = (x - b) / a
+        y_ground = (y - d) / c
+        return x_ground, y_ground
 
 
 # Global capturer instance

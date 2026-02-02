@@ -46,6 +46,7 @@ class Position:
     dx: Optional[float] = None
     dy: Optional[float] = None
     is_player_air: int = 0  # 1 if position is from player's aircraft, else 0
+    is_player_air_view: int = 0  # 1 if air-view conditions detected for this tick
 
 
 def get_connection() -> sqlite3.Connection:
@@ -90,6 +91,7 @@ def _create_tables(conn: sqlite3.Connection):
             army_type TEXT NOT NULL DEFAULT 'tank',
             vehicle_type TEXT NOT NULL DEFAULT '',
             is_player_air INTEGER NOT NULL DEFAULT 0,
+            is_player_air_view INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (match_id) REFERENCES matches(id)
         );
         
@@ -125,6 +127,12 @@ def _create_tables(conn: sqlite3.Connection):
     # Migration: add is_player_air column if missing
     try:
         conn.execute("ALTER TABLE positions ADD COLUMN is_player_air INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    # Migration: add is_player_air_view column if missing
+    try:
+        conn.execute("ALTER TABLE positions ADD COLUMN is_player_air_view INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     except sqlite3.OperationalError:
         pass  # Column already exists
@@ -216,8 +224,8 @@ def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]
         return
 
     conn.executemany(
-        """INSERT INTO positions (match_id, x, y, dx, dy, color, type, icon, timestamp, is_poi, army_type, vehicle_type, is_player_air)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO positions (match_id, x, y, dx, dy, color, type, icon, timestamp, is_poi, army_type, vehicle_type, is_player_air, is_player_air_view)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [(
             match_id,
             p['x'],
@@ -231,7 +239,8 @@ def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]
             p.get('is_poi', 0),
             p.get('army_type', 'tank'),
             p.get('vehicle_type', ''),
-            p.get('is_player_air', 0)
+            p.get('is_player_air', 0),
+            p.get('is_player_air_view', 0)
         ) for p in positions]
     )
     conn.commit()

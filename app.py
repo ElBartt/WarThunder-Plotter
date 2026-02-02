@@ -134,7 +134,8 @@ def create_app():
             'is_poi': p.is_poi,
             'army_type': getattr(p, 'army_type', 'tank'),
             'vehicle_type': getattr(p, 'vehicle_type', ''),
-            'is_player_air': getattr(p, 'is_player_air', 0)
+            'is_player_air': getattr(p, 'is_player_air', 0),
+            'is_player_air_view': getattr(p, 'is_player_air_view', 0)
         } for p in positions])
     
     @app.route('/api/match/<int:match_id>/map.png')

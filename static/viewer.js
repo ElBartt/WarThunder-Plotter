@@ -219,7 +219,11 @@ class MatchViewer {
             const positions = await resp.json();
             
             if (positions.length > 0) {
-                const filtered = positions.filter(pos => pos.is_player_air == false);
+                const filtered = positions.filter(pos => {
+                    const airView = pos.is_player_air_view ?? pos.is_player_air;
+                    const isAirType = (pos.type || '').toLowerCase() === 'aircraft';
+                    return airView == false && !isAirType;
+                });
 
                 // Separate POIs from regular positions
                 for (const pos of filtered) {

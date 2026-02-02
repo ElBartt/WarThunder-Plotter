@@ -64,6 +64,7 @@ class Capturer:
         self.current_map_hash: str = ""  # Current map hash for change detection
         self.current_map_info: Optional[MapInfo] = None
         self.current_air_map_hash: str = ""
+        self._last_poi_signature: Optional[Tuple[Tuple[Any, ...], ...]] = None
         
         # Current live state (for UI feedback)
         self.current_army_type: str = 'tank'
@@ -281,6 +282,7 @@ class Capturer:
         self.current_map_hash = map_hash
         self.current_map_info = map_info
         self.current_air_map_hash = ""
+        self._last_poi_signature = None
         
         if self.on_match_start:
             self.on_match_start(self.current_match_id)
@@ -317,6 +319,7 @@ class Capturer:
         self.current_map_hash = ""  # Reset map hash
         self.current_map_info = None
         self.current_air_map_hash = ""
+        self._last_poi_signature = None
         self.raw_data = []
     
     def _capture_positions_with_data(self, indicators_data: Optional[Dict[str, Any]], map_obj_data: Optional[List[Dict[str, Any]]]):
@@ -345,6 +348,29 @@ class Capturer:
                 return
             
             objects = map_obj_data
+
+            # Detect air-view signals (AirDefence icon or POI changes)
+            poi_types = ('capture_zone',)
+            poi_signature_list: List[Tuple[Any, ...]] = []
+            airdefence_seen = False
+            for obj in objects:
+                x = obj.get('x', -1)
+                y = obj.get('y', -1)
+                if x <= 0 or x >= 1 or y <= 0 or y >= 1:
+                    continue
+                icon = obj.get('icon', '')
+                if isinstance(icon, str) and icon.lower() in ('airdefence', 'air_defence'):
+                    airdefence_seen = True
+                obj_type = obj.get('type', 'unknown')
+                if obj_type in poi_types:
+                    poi_signature_list.append((obj_type, round(x, 4), round(y, 4)))
+
+            poi_signature_list.sort()
+            poi_signature = tuple(poi_signature_list)
+            poi_changed = False
+            if self._last_poi_signature is not None and poi_signature != self._last_poi_signature:
+                poi_changed = True
+            self._last_poi_signature = poi_signature
             
             timestamp = time.time() - self.match_start_time
             
@@ -396,7 +422,8 @@ class Capturer:
                     'is_poi': 1 if is_poi else 0,
                     'army_type': army_type or 'tank',
                     'vehicle_type': vehicle_type or '',
-                    'is_player_air': 1 if (army_type == 'air') else 0
+                    'is_player_air': 1 if (army_type == 'air') else 0,
+                    'is_player_air_view': 1 if (army_type == 'air' or airdefence_seen or poi_changed) else 0
                 }
                 # Ajout dx/dy si présents
                 if dx is not None:

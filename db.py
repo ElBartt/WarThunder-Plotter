@@ -5,13 +5,12 @@ Simple SQLite storage for matches and positions.
 import sqlite3
 from pathlib import Path
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Optional, List, Dict
 from datetime import datetime
 import logging
-import json
 
 DB_PATH = Path(__file__).parent / "data" / "matches.db"
-SCHEMA_VERSION = 2
 
 _ENUM_TABLES = {
     "enum_colors": "color",
@@ -31,13 +30,7 @@ class Match:
     started_at: str
     ended_at: Optional[str]
     map_hash: str
-    map_name: str
-    map_id: Optional[str] = None
-    battle_type: Optional[str] = None
     air_map_hash: Optional[str] = None
-    air_map_id: Optional[str] = None
-    air_map_name: Optional[str] = None
-    air_battle_type: Optional[str] = None
     initial_capture_count: Optional[int] = None
     initial_capture_x: Optional[float] = None
     initial_capture_y: Optional[float] = None
@@ -47,6 +40,44 @@ class Match:
     air_transform_b: Optional[float] = None
     air_transform_c: Optional[float] = None
     air_transform_d: Optional[float] = None
+
+    @cached_property
+    def _map_info(self):
+        from map_hashes import lookup_map_info, UNKNOWN_MAP_INFO
+        if not self.map_hash:
+            return UNKNOWN_MAP_INFO
+        return lookup_map_info(self.map_hash)
+
+    @cached_property
+    def _air_map_info(self):
+        from map_hashes import lookup_map_info, UNKNOWN_MAP_INFO
+        if not self.air_map_hash:
+            return UNKNOWN_MAP_INFO
+        return lookup_map_info(self.air_map_hash)
+
+    @property
+    def map_name(self) -> str:
+        return self._map_info.display_name
+
+    @property
+    def map_id(self) -> str:
+        return self._map_info.map_id
+
+    @property
+    def battle_type(self) -> str:
+        return self._map_info.battle_type.value
+
+    @property
+    def air_map_name(self) -> str:
+        return self._air_map_info.display_name
+
+    @property
+    def air_map_id(self) -> str:
+        return self._air_map_info.map_id
+
+    @property
+    def air_battle_type(self) -> str:
+        return self._air_map_info.battle_type.value
 
 
 @dataclass
@@ -74,7 +105,7 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     _configure_connection(conn)
-    _migrate_schema(conn)
+    _create_tables(conn)
     return conn
 
 
@@ -84,6 +115,7 @@ def _configure_connection(conn: sqlite3.Connection):
     conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
 
 
 def _reset_enum_cache():
@@ -97,11 +129,6 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
         (table_name,)
     ).fetchone()
     return row is not None
-
-
-def _table_columns(conn: sqlite3.Connection, table_name: str) -> List[str]:
-    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return [row["name"] for row in rows]
 
 
 def _ensure_enum_value(conn: sqlite3.Connection, table_name: str, value: Optional[str]) -> int:
@@ -134,7 +161,7 @@ def _to_timestamp_ms(seconds: float) -> int:
     return int(round(float(seconds) * 1000))
 
 
-def _create_tables(conn: sqlite3.Connection, *, commit: bool = True):
+def _create_tables(conn: sqlite3.Connection):
     """Create database tables for the current schema."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS matches (
@@ -142,13 +169,7 @@ def _create_tables(conn: sqlite3.Connection, *, commit: bool = True):
             started_at TEXT NOT NULL,
             ended_at TEXT,
             map_hash TEXT,
-            map_name TEXT,
-            map_id TEXT,
-            battle_type TEXT,
             air_map_hash TEXT,
-            air_map_id TEXT,
-            air_map_name TEXT,
-            air_battle_type TEXT,
             initial_capture_count INTEGER,
             initial_capture_x REAL,
             initial_capture_y REAL,
@@ -211,156 +232,19 @@ def _create_tables(conn: sqlite3.Connection, *, commit: bool = True):
         CREATE INDEX IF NOT EXISTS idx_positions_match ON positions(match_id);
         CREATE INDEX IF NOT EXISTS idx_positions_timestamp ON positions(match_id, timestamp_ms);
     """)
-    if commit:
-        conn.commit()
-
-
-def _migrate_schema(conn: sqlite3.Connection):
-    user_version = conn.execute("PRAGMA user_version").fetchone()[0]
-
-    if not _table_exists(conn, "matches") and not _table_exists(conn, "positions"):
-        _create_tables(conn)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        conn.commit()
-        _reset_enum_cache()
-        return
-
-    if not _table_exists(conn, "positions"):
-        _create_tables(conn)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        conn.commit()
-        _reset_enum_cache()
-        return
-
-    columns = _table_columns(conn, "positions")
-    if "timestamp_ms" in columns and "color_id" in columns:
-        if user_version < SCHEMA_VERSION:
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            conn.commit()
-        _reset_enum_cache()
-        return
-
-    _migrate_legacy_schema(conn)
-
-
-def _migrate_legacy_schema(conn: sqlite3.Connection):
-    logger.info("Migrating legacy database schema to v2")
-    conn.execute("PRAGMA foreign_keys = OFF")
-    conn.execute("BEGIN")
-
-    conn.execute("ALTER TABLE matches RENAME TO matches_old")
-    conn.execute("ALTER TABLE positions RENAME TO positions_old")
-
-    _create_tables(conn, commit=False)
-
-    conn.execute(
-        """INSERT INTO matches (
-                id, started_at, ended_at, map_hash, map_name, map_id, battle_type,
-                air_map_hash, air_map_id, air_map_name, air_battle_type,
-                initial_capture_count, initial_capture_x, initial_capture_y,
-                nuke_detected, air_transform_a, air_transform_b, air_transform_c, air_transform_d
-            )
-            SELECT
-                id, started_at, ended_at, map_hash, map_name, map_id, battle_type,
-                air_map_hash, air_map_id, air_map_name, air_battle_type,
-                initial_capture_count, initial_capture_x, initial_capture_y,
-                nuke_detected, air_transform_a, air_transform_b, air_transform_c, air_transform_d
-            FROM matches_old
-        """
-    )
-
-    _reset_enum_cache()
-    old_columns = set(_table_columns(conn, "positions_old"))
-    select_parts = [
-        "match_id",
-        "x",
-        "y",
-        "color",
-        "type",
-        "icon",
-        "timestamp",
-        "is_poi",
-        "army_type" if "army_type" in old_columns else "'tank' AS army_type",
-        "vehicle_type" if "vehicle_type" in old_columns else "'' AS vehicle_type",
-        "is_player_air" if "is_player_air" in old_columns else "0 AS is_player_air",
-        "is_player_air_view" if "is_player_air_view" in old_columns else "0 AS is_player_air_view",
-        "x_ground" if "x_ground" in old_columns else "NULL AS x_ground",
-        "y_ground" if "y_ground" in old_columns else "NULL AS y_ground",
-    ]
-    old_rows = conn.execute(
-        f"SELECT {', '.join(select_parts)} FROM positions_old ORDER BY id"
-    )
-
-    batch = []
-    batch_size = 5000
-    for row in old_rows:
-        color_id = _ensure_enum_value(conn, "enum_colors", row["color"])
-        type_id = _ensure_enum_value(conn, "enum_types", row["type"])
-        icon_id = _ensure_enum_value(conn, "enum_icons", row["icon"])
-        army_type_id = _ensure_enum_value(conn, "enum_army_types", row["army_type"])
-        vehicle_type_id = _ensure_enum_value(conn, "enum_vehicle_types", row["vehicle_type"])
-
-        batch.append((
-            row["match_id"],
-            _quantize_coord(row["x"]),
-            _quantize_coord(row["y"]),
-            color_id,
-            type_id,
-            icon_id,
-            _to_timestamp_ms(row["timestamp"]),
-            row["is_poi"],
-            army_type_id,
-            vehicle_type_id,
-            row["is_player_air"],
-            row["is_player_air_view"],
-            _quantize_coord(row["x_ground"]),
-            _quantize_coord(row["y_ground"])
-        ))
-
-        if len(batch) >= batch_size:
-            conn.executemany(
-                """INSERT INTO positions (
-                        match_id, x, y, color_id, type_id, icon_id, timestamp_ms,
-                        is_poi, army_type_id, vehicle_type_id, is_player_air, is_player_air_view,
-                        x_ground, y_ground
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                batch
-            )
-            batch = []
-
-    if batch:
-        conn.executemany(
-            """INSERT INTO positions (
-                    match_id, x, y, color_id, type_id, icon_id, timestamp_ms,
-                    is_poi, army_type_id, vehicle_type_id, is_player_air, is_player_air_view,
-                    x_ground, y_ground
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            batch
-        )
-
-    conn.execute("DROP TABLE matches_old")
-    conn.execute("DROP TABLE positions_old")
-
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    conn.execute("COMMIT")
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("VACUUM")
-    _reset_enum_cache()
+    conn.commit()
 
 def start_match(
     conn: sqlite3.Connection,
     map_hash: str = "",
-    map_name: str = "",
-    map_id: Optional[str] = None,
-    battle_type: Optional[str] = None,
     nuke_detected: int = 0
 ) -> int:
     """Start a new match, returns match ID."""
     cur = conn.execute(
         """INSERT INTO matches
-           (started_at, map_hash, map_name, map_id, battle_type, nuke_detected)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), map_hash, map_name, map_id, battle_type, nuke_detected)
+           (started_at, map_hash, nuke_detected)
+           VALUES (?, ?, ?)""",
+        (datetime.now().isoformat(), map_hash, nuke_detected)
     )
     conn.commit()
     return cur.lastrowid
@@ -369,20 +253,14 @@ def start_match(
 def update_match_air_map(
     conn: sqlite3.Connection,
     match_id: int,
-    air_map_hash: str,
-    air_map_name: str,
-    air_map_id: Optional[str] = None,
-    air_battle_type: Optional[str] = None
+    air_map_hash: str
 ):
     """Update air map metadata for a match."""
     conn.execute(
         """UPDATE matches
-           SET air_map_hash = ?,
-               air_map_name = ?,
-               air_map_id = ?,
-               air_battle_type = ?
+           SET air_map_hash = ?
            WHERE id = ?""",
-        (air_map_hash, air_map_name, air_map_id, air_battle_type, match_id)
+        (air_map_hash, match_id)
     )
     conn.commit()
 
@@ -421,8 +299,8 @@ def update_match_initial_capture(
            WHERE id = ?""",
         (
             initial_capture_count,
-            _quantize_coord(initial_capture_x),
-            _quantize_coord(initial_capture_y),
+            round(float(initial_capture_x), 6),
+            round(float(initial_capture_y), 6),
             match_id
         )
     )

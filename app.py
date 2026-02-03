@@ -11,6 +11,7 @@ import click
 
 import db
 import capture
+from map_hashes import lookup_map_info, UNKNOWN_MAP_INFO
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,6 +24,11 @@ MAPS_DIR = Path(__file__).parent / "data" / "maps"
 def create_app():
     """Create Flask application."""
     app = Flask(__name__)
+
+    def resolve_map_info(map_hash: str):
+        if not map_hash:
+            return UNKNOWN_MAP_INFO
+        return lookup_map_info(map_hash)
     
     # Template filter for dates
     @app.template_filter('dt')
@@ -52,6 +58,8 @@ def create_app():
         # Add position counts
         match_data = []
         for m in matches:
+            map_info = resolve_map_info(m.map_hash)
+            air_info = resolve_map_info(m.air_map_hash) if m.air_map_hash else None
             duration_seconds = None
             if m.started_at:
                 try:
@@ -65,8 +73,8 @@ def create_app():
                 'id': m.id,
                 'started_at': m.started_at,
                 'ended_at': m.ended_at,
-                'map_name': m.map_name or 'Unknown',
-                'air_map_name': getattr(m, 'air_map_name', None),
+                'map_name': map_info.display_name,
+                'air_map_name': air_info.display_name if air_info else None,
                 'nuke_detected': getattr(m, 'nuke_detected', 0),
                 'initial_capture_count': getattr(m, 'initial_capture_count', None),
                 'duration_seconds': duration_seconds,
@@ -98,20 +106,23 @@ def create_app():
     def api_matches():
         """Get all matches."""
         matches = db.get_all_matches(conn)
-        return jsonify([{
-            'id': m.id,
-            'started_at': m.started_at,
-            'ended_at': m.ended_at,
-            'map_name': m.map_name,
-            'map_id': getattr(m, 'map_id', None),
-            'battle_type': getattr(m, 'battle_type', None),
-            'air_map_name': getattr(m, 'air_map_name', None),
-            'nuke_detected': getattr(m, 'nuke_detected', 0),
-            'initial_capture_count': getattr(m, 'initial_capture_count', None),
-            'initial_capture_x': getattr(m, 'initial_capture_x', None),
-            'initial_capture_y': getattr(m, 'initial_capture_y', None),
-            'position_count': db.get_positions_count(conn, m.id)
-        } for m in matches])
+        payload = []
+        for m in matches:
+            map_info = resolve_map_info(m.map_hash)
+            payload.append({
+                'id': m.id,
+                'started_at': m.started_at,
+                'ended_at': m.ended_at,
+                'map_name': map_info.display_name,
+                'map_id': map_info.map_id,
+                'battle_type': map_info.battle_type.value,
+                'nuke_detected': getattr(m, 'nuke_detected', 0),
+                'initial_capture_count': getattr(m, 'initial_capture_count', None),
+                'initial_capture_x': getattr(m, 'initial_capture_x', None),
+                'initial_capture_y': getattr(m, 'initial_capture_y', None),
+                'position_count': db.get_positions_count(conn, m.id)
+            })
+        return jsonify(payload)
     
     @app.route('/api/match/<int:match_id>')
     def api_match(match_id: int):
@@ -119,18 +130,15 @@ def create_app():
         match = db.get_match(conn, match_id)
         if not match:
             return jsonify({'error': 'Not found'}), 404
+        map_info = resolve_map_info(match.map_hash)
         return jsonify({
             'id': match.id,
             'started_at': match.started_at,
             'ended_at': match.ended_at,
-            'map_name': match.map_name,
+            'map_name': map_info.display_name,
             'map_hash': match.map_hash,
-            'map_id': getattr(match, 'map_id', None),
-            'battle_type': getattr(match, 'battle_type', None),
-            'air_map_hash': getattr(match, 'air_map_hash', None),
-            'air_map_id': getattr(match, 'air_map_id', None),
-            'air_map_name': getattr(match, 'air_map_name', None),
-            'air_battle_type': getattr(match, 'air_battle_type', None),
+            'map_id': map_info.map_id,
+            'battle_type': map_info.battle_type.value,
             'nuke_detected': getattr(match, 'nuke_detected', 0),
             'initial_capture_count': getattr(match, 'initial_capture_count', None),
             'initial_capture_x': getattr(match, 'initial_capture_x', None),
@@ -175,7 +183,8 @@ def create_app():
         match = db.get_match(conn, match_id)
         if not match:
             return '', 404
-        map_id = getattr(match, 'map_id', None)
+        map_info = resolve_map_info(match.map_hash)
+        map_id = map_info.map_id
         if map_id in (None, '', 'unknown', 'no_map'):
             map_key = match.map_hash
         else:

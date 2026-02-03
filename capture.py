@@ -289,10 +289,7 @@ class Capturer:
         # Create match in database
         self.current_match_id = db.start_match(
             self.conn,
-            map_hash=map_hash,
-            map_name=map_name,
-            map_id=map_id,
-            battle_type=battle_type
+            map_hash=map_hash
         )
         
         # Store current map hash for change detection
@@ -544,10 +541,7 @@ class Capturer:
         db.update_match_air_map(
             self.conn,
             self.current_match_id,
-            air_map_hash=map_hash,
-            air_map_name=air_info.display_name,
-            air_map_id=air_info.map_id,
-            air_battle_type=air_info.battle_type.value
+            air_map_hash=map_hash
         )
         self.current_air_map_hash = map_hash
 

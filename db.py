@@ -81,22 +81,14 @@ class Match:
 
 
 @dataclass
-class Position:
+class Tick:
     id: int
     match_id: int
-    x: float
-    y: float
-    color: str
-    type: str
-    icon: str
-    timestamp: int  # milliseconds since match start
-    is_poi: bool
-    army_type: str = 'tank'  # 'tank' or 'air'
-    vehicle_type: str = ''  # e.g., 'fr_leclerc_s1', 'rafale_c_f3'
-    is_player_air: int = 0  # 1 if position is from player's aircraft, else 0
-    is_player_air_view: int = 0  # 1 if air-view conditions detected for this tick
-    x_ground: Optional[float] = None  # x converted back to ground reference frame
-    y_ground: Optional[float] = None  # y converted back to ground reference frame
+    timestamp: int
+    army_type: str
+    vehicle_type: str
+    is_player_air: int
+    is_player_air_view: int
 
 
 def get_connection() -> sqlite3.Connection:
@@ -116,19 +108,6 @@ def _configure_connection(conn: sqlite3.Connection):
     conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
     conn.execute("PRAGMA busy_timeout = 5000")
-
-
-def _reset_enum_cache():
-    for table_cache in _ENUM_CACHE.values():
-        table_cache.clear()
-
-
-def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-        (table_name,)
-    ).fetchone()
-    return row is not None
 
 
 def _ensure_enum_value(conn: sqlite3.Connection, table_name: str, value: Optional[str]) -> int:
@@ -205,32 +184,41 @@ def _create_tables(conn: sqlite3.Connection):
             value TEXT NOT NULL UNIQUE
         );
         
+        CREATE TABLE IF NOT EXISTS ticks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            timestamp_ms INTEGER NOT NULL,
+            army_type_id INTEGER NOT NULL,
+            vehicle_type_id INTEGER NOT NULL,
+            is_player_air INTEGER NOT NULL DEFAULT 0,
+            is_player_air_view INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (match_id) REFERENCES matches(id),
+            FOREIGN KEY (army_type_id) REFERENCES enum_army_types(id),
+            FOREIGN KEY (vehicle_type_id) REFERENCES enum_vehicle_types(id)
+        );
+
         CREATE TABLE IF NOT EXISTS positions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             match_id INTEGER NOT NULL,
+            tick_id INTEGER NOT NULL,
             x REAL NOT NULL,
             y REAL NOT NULL,
             color_id INTEGER NOT NULL,
             type_id INTEGER NOT NULL,
             icon_id INTEGER NOT NULL,
-            timestamp_ms INTEGER NOT NULL,
             is_poi INTEGER NOT NULL DEFAULT 0,
-            army_type_id INTEGER NOT NULL,
-            vehicle_type_id INTEGER NOT NULL,
-            is_player_air INTEGER NOT NULL DEFAULT 0,
-            is_player_air_view INTEGER NOT NULL DEFAULT 0,
             x_ground REAL,
             y_ground REAL,
             FOREIGN KEY (match_id) REFERENCES matches(id),
+            FOREIGN KEY (tick_id) REFERENCES ticks(id),
             FOREIGN KEY (color_id) REFERENCES enum_colors(id),
             FOREIGN KEY (type_id) REFERENCES enum_types(id),
-            FOREIGN KEY (icon_id) REFERENCES enum_icons(id),
-            FOREIGN KEY (army_type_id) REFERENCES enum_army_types(id),
-            FOREIGN KEY (vehicle_type_id) REFERENCES enum_vehicle_types(id)
+            FOREIGN KEY (icon_id) REFERENCES enum_icons(id)
         );
-        
+
         CREATE INDEX IF NOT EXISTS idx_positions_match ON positions(match_id);
-        CREATE INDEX IF NOT EXISTS idx_positions_timestamp ON positions(match_id, timestamp_ms);
+        CREATE INDEX IF NOT EXISTS idx_positions_tick ON positions(tick_id);
+        CREATE INDEX IF NOT EXISTS idx_ticks_match_ts ON ticks(match_id, timestamp_ms);
     """)
     conn.commit()
 
@@ -337,37 +325,50 @@ def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]
     if not positions:
         return
 
+    tick_source = positions[0]
+    timestamp_ms = _to_timestamp_ms(tick_source['timestamp'])
+    army_type_id = _ensure_enum_value(conn, "enum_army_types", tick_source.get('army_type', 'tank'))
+    vehicle_type_id = _ensure_enum_value(conn, "enum_vehicle_types", tick_source.get('vehicle_type', ''))
+
+    cur = conn.execute(
+        """INSERT INTO ticks
+           (match_id, timestamp_ms, army_type_id, vehicle_type_id, is_player_air, is_player_air_view)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            match_id,
+            timestamp_ms,
+            army_type_id,
+            vehicle_type_id,
+            tick_source.get('is_player_air', 0),
+            tick_source.get('is_player_air_view', 0)
+        )
+    )
+    tick_id = cur.lastrowid
+
     rows = []
     for p in positions:
         color_id = _ensure_enum_value(conn, "enum_colors", p.get('color', ''))
         type_id = _ensure_enum_value(conn, "enum_types", p.get('type', ''))
         icon_id = _ensure_enum_value(conn, "enum_icons", p.get('icon', ''))
-        army_type_id = _ensure_enum_value(conn, "enum_army_types", p.get('army_type', 'tank'))
-        vehicle_type_id = _ensure_enum_value(conn, "enum_vehicle_types", p.get('vehicle_type', ''))
 
         rows.append((
             match_id,
+            tick_id,
             _quantize_coord(p['x']),
             _quantize_coord(p['y']),
             color_id,
             type_id,
             icon_id,
-            _to_timestamp_ms(p['timestamp']),
             p.get('is_poi', 0),
-            army_type_id,
-            vehicle_type_id,
-            p.get('is_player_air', 0),
-            p.get('is_player_air_view', 0),
             _quantize_coord(p.get('x_ground')),
             _quantize_coord(p.get('y_ground'))
         ))
 
     conn.executemany(
         """INSERT INTO positions (
-                match_id, x, y, color_id, type_id, icon_id, timestamp_ms,
-                is_poi, army_type_id, vehicle_type_id, is_player_air, is_player_air_view,
-                x_ground, y_ground
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                match_id, tick_id, x, y, color_id, type_id, icon_id,
+                is_poi, x_ground, y_ground
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows
     )
     conn.commit()
@@ -399,38 +400,68 @@ def get_all_matches(conn: sqlite3.Connection) -> List[Match]:
     return [Match(**dict(row)) for row in rows]
 
 
-def get_positions(conn: sqlite3.Connection, match_id: int, since_ts_ms: int = 0) -> List[Position]:
-    """Get positions for a match, optionally since a given timestamp (ms)."""
+def get_positions_bundle(conn: sqlite3.Connection, match_id: int, since_ts_ms: int = 0) -> Dict[str, List[dict]]:
+    """Get positions and ticks for a match, optionally since a given timestamp (ms)."""
     rows = conn.execute(
         """
         SELECT
             p.id,
-            p.match_id,
+            p.tick_id,
             p.x,
             p.y,
+            p.is_poi,
+            p.x_ground,
+            p.y_ground,
             c.value AS color,
             t.value AS type,
             i.value AS icon,
-            p.timestamp_ms AS timestamp,
-            p.is_poi,
+            tk.timestamp_ms AS tick_timestamp,
             at.value AS army_type,
             vt.value AS vehicle_type,
-            p.is_player_air,
-            p.is_player_air_view,
-            p.x_ground,
-            p.y_ground
+            tk.is_player_air,
+            tk.is_player_air_view
         FROM positions p
+        INNER JOIN ticks tk ON tk.id = p.tick_id
         LEFT JOIN enum_colors c ON c.id = p.color_id
         LEFT JOIN enum_types t ON t.id = p.type_id
         LEFT JOIN enum_icons i ON i.id = p.icon_id
-        LEFT JOIN enum_army_types at ON at.id = p.army_type_id
-        LEFT JOIN enum_vehicle_types vt ON vt.id = p.vehicle_type_id
-        WHERE p.match_id = ? AND p.timestamp_ms >= ?
-        ORDER BY p.timestamp_ms
+        LEFT JOIN enum_army_types at ON at.id = tk.army_type_id
+        LEFT JOIN enum_vehicle_types vt ON vt.id = tk.vehicle_type_id
+        WHERE p.match_id = ? AND tk.timestamp_ms >= ?
+        ORDER BY tk.timestamp_ms, p.id
         """,
         (match_id, int(since_ts_ms))
     ).fetchall()
-    return [Position(**dict(row)) for row in rows]
+
+    ticks_by_id: Dict[int, dict] = {}
+    positions: List[dict] = []
+    for row in rows:
+        tick_id = row["tick_id"]
+        if tick_id not in ticks_by_id:
+            ticks_by_id[tick_id] = {
+                "id": tick_id,
+                "timestamp": row["tick_timestamp"],
+                "army_type": row["army_type"],
+                "vehicle_type": row["vehicle_type"],
+                "is_player_air": row["is_player_air"],
+                "is_player_air_view": row["is_player_air_view"],
+            }
+        positions.append({
+            "id": row["id"],
+            "tick_id": tick_id,
+            "x": row["x"],
+            "y": row["y"],
+            "color": row["color"],
+            "type": row["type"],
+            "icon": row["icon"],
+            "is_poi": row["is_poi"],
+            "x_ground": row["x_ground"],
+            "y_ground": row["y_ground"],
+        })
+
+    ticks = list(ticks_by_id.values())
+    ticks.sort(key=lambda item: item["timestamp"])
+    return {"positions": positions, "ticks": ticks}
 
 
 def get_positions_count(conn: sqlite3.Connection, match_id: int) -> int:
@@ -441,9 +472,36 @@ def get_positions_count(conn: sqlite3.Connection, match_id: int) -> int:
     return row['cnt'] if row else 0
 
 
+def get_latest_tick(conn: sqlite3.Connection, match_id: int) -> Optional[Tick]:
+    """Get the latest tick metadata for a match."""
+    row = conn.execute(
+        """
+        SELECT
+            tk.id,
+            tk.match_id,
+            tk.timestamp_ms AS timestamp,
+            at.value AS army_type,
+            vt.value AS vehicle_type,
+            tk.is_player_air,
+            tk.is_player_air_view
+        FROM ticks tk
+        LEFT JOIN enum_army_types at ON at.id = tk.army_type_id
+        LEFT JOIN enum_vehicle_types vt ON vt.id = tk.vehicle_type_id
+        WHERE tk.match_id = ?
+        ORDER BY tk.timestamp_ms DESC, tk.id DESC
+        LIMIT 1
+        """,
+        (match_id,)
+    ).fetchone()
+    if row:
+        return Tick(**dict(row))
+    return None
+
+
 def delete_match(conn: sqlite3.Connection, match_id: int):
     """Delete a match and its positions."""
     conn.execute("DELETE FROM positions WHERE match_id = ?", (match_id,))
+    conn.execute("DELETE FROM ticks WHERE match_id = ?", (match_id,))
     conn.execute("DELETE FROM matches WHERE id = ?", (match_id,))
     conn.commit()
     try:

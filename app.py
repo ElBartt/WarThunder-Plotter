@@ -160,22 +160,8 @@ def create_app():
                 since = int(since_raw)
         except (ValueError, TypeError):
             since = 0
-        positions = db.get_positions(conn, match_id, since_ts_ms=since)
-        return jsonify([{
-            'x': p.x,
-            'y': p.y,
-            'color': p.color,
-            'type': p.type,
-            'icon': p.icon,
-            'timestamp': p.timestamp,
-            'is_poi': p.is_poi,
-            'army_type': getattr(p, 'army_type', 'tank'),
-            'vehicle_type': getattr(p, 'vehicle_type', ''),
-            'is_player_air': getattr(p, 'is_player_air', 0),
-            'is_player_air_view': getattr(p, 'is_player_air_view', 0),
-            'x_ground': getattr(p, 'x_ground', None),
-            'y_ground': getattr(p, 'y_ground', None)
-        } for p in positions])
+        bundle = db.get_positions_bundle(conn, match_id, since_ts_ms=since)
+        return jsonify(bundle)
     
     @app.route('/api/match/<int:match_id>/map.png')
     def api_map_image(match_id: int):
@@ -213,11 +199,18 @@ def create_app():
         """Get capture status."""
         capturer = capture.get_capturer()
         active = db.get_active_match(conn)
+        army_type = getattr(capturer, 'current_army_type', 'tank')
+        vehicle_type = getattr(capturer, 'current_vehicle_type', '')
+        if active and (not army_type or not vehicle_type):
+            latest_tick = db.get_latest_tick(conn, active.id)
+            if latest_tick:
+                army_type = army_type or latest_tick.army_type
+                vehicle_type = vehicle_type or latest_tick.vehicle_type
         return jsonify({
             'capturing': capturer.running,
             'active_match_id': active.id if active else None,
-            'army_type': getattr(capturer, 'current_army_type', 'tank'),
-            'vehicle_type': getattr(capturer, 'current_vehicle_type', '')
+            'army_type': army_type or 'tank',
+            'vehicle_type': vehicle_type or ''
         })
     
     @app.route('/api/match/<int:match_id>', methods=['DELETE'])

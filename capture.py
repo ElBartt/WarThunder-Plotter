@@ -359,13 +359,16 @@ class Capturer:
             # Use pre-fetched indicators data
             army_type = indicators_data.get('army') if indicators_data else None
             vehicle_type = indicators_data.get('type', '') if indicators_data else ''
+            
             # Remove model prefix (tankModels/, aircraftModels/, etc.)
             if '/' in vehicle_type:
                 vehicle_type = vehicle_type.split('/', 1)[1]
             vehicle_type = vehicle_type if vehicle_type else None
             
-            self.current_army_type = army_type or 'tank'
-            self.current_vehicle_type = vehicle_type or ''
+            if army_type:
+                self.current_army_type = army_type
+            if vehicle_type:
+                self.current_vehicle_type = vehicle_type
 
             self._maybe_capture_air_map(army_type)
             

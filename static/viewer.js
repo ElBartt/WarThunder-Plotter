@@ -216,24 +216,42 @@ class MatchViewer {
     async _loadPositions() {
         try {
             const resp = await fetch(`/api/match/${this.matchId}/positions?since=${this.lastTimestamp}`);
-            const positions = await resp.json();
+            const data = await resp.json();
+            const ticks = data.ticks || [];
+            const positions = data.positions || [];
             
             if (positions.length > 0) {
-                // Process positions: use ground coordinates when available
+                const tickMap = new Map();
+                for (const tick of ticks) {
+                    tickMap.set(tick.id, tick);
+                }
+
+                // Process positions: attach tick metadata and use ground coordinates when available
                 const processed = positions.map(pos => {
-                    // Use ground coordinates when available (for air-view positions)
-                    if (pos.x_ground !== null && pos.x_ground !== undefined &&
-                        pos.y_ground !== null && pos.y_ground !== undefined) {
+                    const tick = tickMap.get(pos.tick_id);
+                    if (!tick) {
+                        return null;
+                    }
+                    const merged = {
+                        ...pos,
+                        timestamp: tick.timestamp,
+                        army_type: tick.army_type,
+                        vehicle_type: tick.vehicle_type,
+                        is_player_air: tick.is_player_air,
+                        is_player_air_view: tick.is_player_air_view
+                    };
+                    if (merged.x_ground !== null && merged.x_ground !== undefined &&
+                        merged.y_ground !== null && merged.y_ground !== undefined) {
                         return {
-                            ...pos,
-                            x: pos.x_ground,
-                            y: pos.y_ground,
-                            x_original: pos.x,
-                            y_original: pos.y
+                            ...merged,
+                            x: merged.x_ground,
+                            y: merged.y_ground,
+                            x_original: merged.x,
+                            y_original: merged.y
                         };
                     }
-                    return pos;
-                });
+                    return merged;
+                }).filter(Boolean);
 
                 // Separate POIs from regular positions (store all for stats, filter aircraft for display)
                 for (const pos of processed) {
@@ -333,6 +351,11 @@ class MatchViewer {
                 console.debug(`Live army type: ${this.liveArmyType}, vehicle type: ${this.liveVehicleType}`);
                 armyType = this.liveArmyType || 'tank';
                 vehicleType = this.liveVehicleType || '';
+                if ((!vehicleType || !armyType) && this.positions.length > 0) {
+                    const latest = this.positions[this.positions.length - 1];
+                    armyType = armyType || latest.army_type || 'tank';
+                    vehicleType = vehicleType || latest.vehicle_type || '';
+                }
             } else if (this.positions.length > 0) {
                 if (this.timelinePosition >= 1.0) {
                     // Showing all: use latest position

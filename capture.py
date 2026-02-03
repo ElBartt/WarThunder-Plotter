@@ -292,8 +292,7 @@ class Capturer:
             map_hash=map_hash,
             map_name=map_name,
             map_id=map_id,
-            battle_type=battle_type,
-            map_image=None
+            battle_type=battle_type
         )
         
         # Store current map hash for change detection
@@ -466,8 +465,6 @@ class Capturer:
             for obj in objects:
                 x = obj.get('x', -1)
                 y = obj.get('y', -1)
-                dx = obj.get('dx')
-                dy = obj.get('dy')
 
                 # Skip invalid positions (WT-Plotter validation)
                 if x <= 0 or x >= 1 or y <= 0 or y >= 1:
@@ -503,11 +500,6 @@ class Capturer:
                     pos['x_ground'] = x_ground
                     pos['y_ground'] = y_ground
                 
-                # Ajout dx/dy si présents
-                if dx is not None:
-                    pos['dx'] = dx
-                if dy is not None:
-                    pos['dy'] = dy
                 positions.append(pos)
             
             if positions:

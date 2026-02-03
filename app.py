@@ -144,13 +144,18 @@ def create_app():
     @app.route('/api/match/<int:match_id>/positions')
     def api_positions(match_id: int):
         """Get positions for a match."""
-        since = float(request.args.get('since', 0))
-        positions = db.get_positions(conn, match_id, since_ts=since)
+        since_raw = request.args.get('since', '0')
+        try:
+            if isinstance(since_raw, str) and '.' in since_raw:
+                since = int(float(since_raw) * 1000)
+            else:
+                since = int(since_raw)
+        except (ValueError, TypeError):
+            since = 0
+        positions = db.get_positions(conn, match_id, since_ts_ms=since)
         return jsonify([{
             'x': p.x,
             'y': p.y,
-            'dx': getattr(p, 'dx', None),
-            'dy': getattr(p, 'dy', None),
             'color': p.color,
             'type': p.type,
             'icon': p.icon,

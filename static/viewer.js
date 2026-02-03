@@ -48,7 +48,7 @@ class MatchViewer {
         
         // Timeline state (for replay mode)
         this.timelinePosition = 1.0;  // Current time position (0-1, 1 = show all)
-        this.maxTimestamp = 0;        // Max timestamp in data (seconds)
+        this.maxTimestamp = 0;        // Max timestamp in data (ms)
         
         // Initialize
         this._loadMap();
@@ -247,7 +247,7 @@ class MatchViewer {
                 // Update last timestamp
                 const maxTs = Math.max(...processed.map(p => p.timestamp));
                 if (maxTs > this.lastTimestamp) {
-                    this.lastTimestamp = maxTs + 0.001; // Small offset to avoid duplicates
+                    this.lastTimestamp = maxTs + 1; // Small offset to avoid duplicates (ms)
                 }
 
                 // Update max timestamp for timeline
@@ -650,8 +650,9 @@ class MatchViewer {
     }
     
     formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
+        const totalSeconds = Math.floor(seconds / 1000);
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = Math.floor(totalSeconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
     

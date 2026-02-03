@@ -219,14 +219,24 @@ class MatchViewer {
             const positions = await resp.json();
             
             if (positions.length > 0) {
-                const filtered = positions.filter(pos => {
-                    const airView = pos.is_player_air_view ?? pos.is_player_air;
-                    const isAirType = (pos.type || '').toLowerCase() === 'aircraft';
-                    return airView == false && !isAirType;
+                // Process positions: use ground coordinates when available
+                const processed = positions.map(pos => {
+                    // Use ground coordinates when available (for air-view positions)
+                    if (pos.x_ground !== null && pos.x_ground !== undefined &&
+                        pos.y_ground !== null && pos.y_ground !== undefined) {
+                        return {
+                            ...pos,
+                            x: pos.x_ground,
+                            y: pos.y_ground,
+                            x_original: pos.x,
+                            y_original: pos.y
+                        };
+                    }
+                    return pos;
                 });
 
-                // Separate POIs from regular positions
-                for (const pos of filtered) {
+                // Separate POIs from regular positions (store all for stats, filter aircraft for display)
+                for (const pos of processed) {
                     if (pos.is_poi) {
                         this.pois.push(pos);
                     } else {
@@ -235,7 +245,7 @@ class MatchViewer {
                 }
 
                 // Update last timestamp
-                const maxTs = Math.max(...filtered.map(p => p.timestamp));
+                const maxTs = Math.max(...processed.map(p => p.timestamp));
                 if (maxTs > this.lastTimestamp) {
                     this.lastTimestamp = maxTs + 0.001; // Small offset to avoid duplicates
                 }
@@ -350,10 +360,9 @@ class MatchViewer {
             
             let html = `${total} positions, ${poiCount} POIs<br>`;
             
-            // Show warning when in air mode (not recorded)
+            // Show status about air mode
             if (armyType === 'air') {
-                const warningText = this.isLive ? 'IN AIR - NOT RECORDING' : 'IN AIR - NOT RECORDED';
-                html += `<span class="army-status air-warning">✈️ ${warningText}</span>`;
+                html += `<span class="army-status air-info">✈️ Air View (mapped to ground)</span>`;
             } else {
                 html += `<span class="army-status">🚗 Ground</span>`;
             }
@@ -435,6 +444,16 @@ class MatchViewer {
     }
     
     _shouldShow(pos) {
+        // Don't display aircraft type positions on the map
+        const isAirType = (pos.type || '').toLowerCase() === 'aircraft';
+        if (isAirType) return false;
+        
+        // Don't display air-view positions without ground coordinates
+        const isAirView = pos.is_player_air_view || pos.is_player_air;
+        if (isAirView && (pos.x_ground === null || pos.x_ground === undefined)) {
+            return false;
+        }
+        
         const cat = this._categorize(pos);
         if (this.filters[cat] === false) return false;
         

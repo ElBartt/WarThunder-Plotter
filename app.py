@@ -134,7 +134,11 @@ def create_app():
             'nuke_detected': getattr(match, 'nuke_detected', 0),
             'initial_capture_count': getattr(match, 'initial_capture_count', None),
             'initial_capture_x': getattr(match, 'initial_capture_x', None),
-            'initial_capture_y': getattr(match, 'initial_capture_y', None)
+            'initial_capture_y': getattr(match, 'initial_capture_y', None),
+            'air_transform_a': getattr(match, 'air_transform_a', None),
+            'air_transform_b': getattr(match, 'air_transform_b', None),
+            'air_transform_c': getattr(match, 'air_transform_c', None),
+            'air_transform_d': getattr(match, 'air_transform_d', None)
         })
     
     @app.route('/api/match/<int:match_id>/positions')
@@ -155,7 +159,9 @@ def create_app():
             'army_type': getattr(p, 'army_type', 'tank'),
             'vehicle_type': getattr(p, 'vehicle_type', ''),
             'is_player_air': getattr(p, 'is_player_air', 0),
-            'is_player_air_view': getattr(p, 'is_player_air_view', 0)
+            'is_player_air_view': getattr(p, 'is_player_air_view', 0),
+            'x_ground': getattr(p, 'x_ground', None),
+            'y_ground': getattr(p, 'y_ground', None)
         } for p in positions])
     
     @app.route('/api/match/<int:match_id>/map.png')

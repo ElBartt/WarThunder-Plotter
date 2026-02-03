@@ -235,6 +235,11 @@ a:hover {
   animation: pulse-warning 1s ease-in-out infinite;
 }
 
+.army-status.air-info {
+  background: #1a3a5a;
+  color: #6bbaff;
+}
+
 @keyframes pulse-warning {
   0%,
   100% {

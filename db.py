@@ -1,14 +1,16 @@
 """
 Database module for WT Plotter.
-Simple SQLite storage for matches and positions.
+Uses SQLite to store matches, ticks, and position data.
 """
-import sqlite3
-from pathlib import Path
+from __future__ import annotations
+
 from dataclasses import dataclass
-from functools import cached_property
-from typing import Optional, List, Dict
 from datetime import datetime
+from functools import cached_property
 import logging
+from pathlib import Path
+import sqlite3
+from typing import Dict, List, Optional
 
 DB_PATH = Path(__file__).parent / "data" / "matches.db"
 
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Match:
+    """Stored match metadata and derived map information helpers."""
     id: int
     started_at: str
     ended_at: Optional[str]
@@ -35,7 +38,6 @@ class Match:
     initial_capture_x: Optional[float] = None
     initial_capture_y: Optional[float] = None
     nuke_detected: int = 0
-    # Air view transformation parameters: x_air = a*x + b, y_air = c*y + d
     air_transform_a: Optional[float] = None
     air_transform_b: Optional[float] = None
     air_transform_c: Optional[float] = None
@@ -43,6 +45,7 @@ class Match:
 
     @cached_property
     def _map_info(self):
+        """Return the map metadata for the ground map hash."""
         from map_hashes import lookup_map_info, UNKNOWN_MAP_INFO
         if not self.map_hash:
             return UNKNOWN_MAP_INFO
@@ -50,6 +53,7 @@ class Match:
 
     @cached_property
     def _air_map_info(self):
+        """Return the map metadata for the air map hash."""
         from map_hashes import lookup_map_info, UNKNOWN_MAP_INFO
         if not self.air_map_hash:
             return UNKNOWN_MAP_INFO
@@ -82,6 +86,7 @@ class Match:
 
 @dataclass
 class Tick:
+    """Tick metadata stored alongside positions."""
     id: int
     match_id: int
     timestamp: int
@@ -92,7 +97,7 @@ class Tick:
 
 
 def get_connection() -> sqlite3.Connection:
-    """Get database connection, creating tables if needed."""
+    """Return a configured database connection and ensure schema exists."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -101,7 +106,8 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
-def _configure_connection(conn: sqlite3.Connection):
+def _configure_connection(conn: sqlite3.Connection) -> None:
+    """Apply SQLite PRAGMA settings for better performance and integrity."""
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA synchronous = NORMAL")
@@ -110,7 +116,12 @@ def _configure_connection(conn: sqlite3.Connection):
     conn.execute("PRAGMA busy_timeout = 5000")
 
 
-def _ensure_enum_value(conn: sqlite3.Connection, table_name: str, value: Optional[str]) -> int:
+def _ensure_enum_value(
+    conn: sqlite3.Connection,
+    table_name: str,
+    value: Optional[str],
+) -> int:
+    """Ensure a value exists in an enum table and return its id."""
     if value is None:
         value = ""
     cache = _ENUM_CACHE[table_name]
@@ -131,16 +142,18 @@ def _ensure_enum_value(conn: sqlite3.Connection, table_name: str, value: Optiona
 
 
 def _quantize_coord(value: Optional[float]) -> Optional[float]:
+    """Quantize coordinates for consistent storage precision."""
     if value is None:
         return None
     return round(float(value), 5)
 
 
 def _to_timestamp_ms(seconds: float) -> int:
+    """Convert floating seconds to integer milliseconds."""
     return int(round(float(seconds) * 1000))
 
 
-def _create_tables(conn: sqlite3.Connection):
+def _create_tables(conn: sqlite3.Connection) -> None:
     """Create database tables for the current schema."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS matches (
@@ -225,7 +238,7 @@ def _create_tables(conn: sqlite3.Connection):
 def start_match(
     conn: sqlite3.Connection,
     map_hash: str = "",
-    nuke_detected: int = 0
+    nuke_detected: int = 0,
 ) -> int:
     """Start a new match, returns match ID."""
     cur = conn.execute(
@@ -241,8 +254,8 @@ def start_match(
 def update_match_air_map(
     conn: sqlite3.Connection,
     match_id: int,
-    air_map_hash: str
-):
+    air_map_hash: str,
+) -> None:
     """Update air map metadata for a match."""
     conn.execute(
         """UPDATE matches
@@ -253,7 +266,7 @@ def update_match_air_map(
     conn.commit()
 
 
-def end_match(conn: sqlite3.Connection, match_id: int):
+def end_match(conn: sqlite3.Connection, match_id: int) -> None:
     """Mark a match as ended."""
     conn.execute(
         "UPDATE matches SET ended_at = ? WHERE id = ?",
@@ -262,7 +275,11 @@ def end_match(conn: sqlite3.Connection, match_id: int):
     conn.commit()
 
 
-def update_match_nuke(conn: sqlite3.Connection, match_id: int, nuke_detected: int = 1):
+def update_match_nuke(
+    conn: sqlite3.Connection,
+    match_id: int,
+    nuke_detected: int = 1,
+) -> None:
     """Mark a match as a nuke match."""
     conn.execute(
         "UPDATE matches SET nuke_detected = ? WHERE id = ?",
@@ -276,8 +293,8 @@ def update_match_initial_capture(
     match_id: int,
     initial_capture_count: int,
     initial_capture_x: float,
-    initial_capture_y: float
-):
+    initial_capture_y: float,
+) -> None:
     """Store initial capture-zone count and barycenter for a match."""
     conn.execute(
         """UPDATE matches
@@ -301,13 +318,9 @@ def update_match_air_transform(
     a: float,
     b: float,
     c: float,
-    d: float
-):
-    """Store air view transformation parameters for a match.
-    
-    The transformation is: x_air = a*x_ground + b, y_air = c*y_ground + d
-    To convert back: x_ground = (x_air - b) / a, y_ground = (y_air - d) / c
-    """
+    d: float,
+) -> None:
+    """Store air-view transformation parameters for a match."""
     conn.execute(
         """UPDATE matches
            SET air_transform_a = ?,
@@ -320,15 +333,27 @@ def update_match_air_transform(
     conn.commit()
 
 
-def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]):
+def add_positions(
+    conn: sqlite3.Connection,
+    match_id: int,
+    positions: List[dict],
+) -> None:
     """Add multiple positions to a match."""
     if not positions:
         return
 
     tick_source = positions[0]
     timestamp_ms = _to_timestamp_ms(tick_source['timestamp'])
-    army_type_id = _ensure_enum_value(conn, "enum_army_types", tick_source.get('army_type', 'tank'))
-    vehicle_type_id = _ensure_enum_value(conn, "enum_vehicle_types", tick_source.get('vehicle_type', ''))
+    army_type_id = _ensure_enum_value(
+        conn,
+        "enum_army_types",
+        tick_source.get("army_type", "tank"),
+    )
+    vehicle_type_id = _ensure_enum_value(
+        conn,
+        "enum_vehicle_types",
+        tick_source.get("vehicle_type", ""),
+    )
 
     cur = conn.execute(
         """INSERT INTO ticks
@@ -354,14 +379,14 @@ def add_positions(conn: sqlite3.Connection, match_id: int, positions: List[dict]
         rows.append((
             match_id,
             tick_id,
-            _quantize_coord(p['x']),
-            _quantize_coord(p['y']),
+            _quantize_coord(p["x"]),
+            _quantize_coord(p["y"]),
             color_id,
             type_id,
             icon_id,
-            p.get('is_poi', 0),
-            _quantize_coord(p.get('x_ground')),
-            _quantize_coord(p.get('y_ground'))
+            p.get("is_poi", 0),
+            _quantize_coord(p.get("x_ground")),
+            _quantize_coord(p.get("y_ground")),
         ))
 
     conn.executemany(
@@ -400,8 +425,12 @@ def get_all_matches(conn: sqlite3.Connection) -> List[Match]:
     return [Match(**dict(row)) for row in rows]
 
 
-def get_positions_bundle(conn: sqlite3.Connection, match_id: int, since_ts_ms: int = 0) -> Dict[str, List[dict]]:
-    """Get positions and ticks for a match, optionally since a given timestamp (ms)."""
+def get_positions_bundle(
+    conn: sqlite3.Connection,
+    match_id: int,
+    since_ts_ms: int = 0,
+) -> Dict[str, List[dict]]:
+    """Get positions and ticks for a match, optionally since a timestamp."""
     rows = conn.execute(
         """
         SELECT
@@ -469,7 +498,7 @@ def get_positions_count(conn: sqlite3.Connection, match_id: int) -> int:
     row = conn.execute(
         "SELECT COUNT(*) as cnt FROM positions WHERE match_id = ?", (match_id,)
     ).fetchone()
-    return row['cnt'] if row else 0
+    return row["cnt"] if row else 0
 
 
 def get_latest_tick(conn: sqlite3.Connection, match_id: int) -> Optional[Tick]:
@@ -498,7 +527,7 @@ def get_latest_tick(conn: sqlite3.Connection, match_id: int) -> Optional[Tick]:
     return None
 
 
-def delete_match(conn: sqlite3.Connection, match_id: int):
+def delete_match(conn: sqlite3.Connection, match_id: int) -> None:
     """Delete a match and its positions."""
     conn.execute("DELETE FROM positions WHERE match_id = ?", (match_id,))
     conn.execute("DELETE FROM ticks WHERE match_id = ?", (match_id,))

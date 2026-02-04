@@ -1,9 +1,13 @@
+"""Map hash lookup utilities and metadata for War Thunder maps."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional
 
 
 class BattleType(str, Enum):
+    """Supported battle type categories for map metadata."""
     AIR = "air"
     GROUND = "ground"
     NAVAL = "naval"
@@ -14,6 +18,7 @@ class BattleType(str, Enum):
 
 @dataclass(frozen=True)
 class MapInfo:
+    """Map metadata used for lookups and display."""
     map_id: str
     display_name: str
     battle_type: BattleType
@@ -284,6 +289,7 @@ def _append_missing_hash(
     closest_hash: Optional[str],
     closest_map_id: Optional[str],
 ) -> None:
+    """Persist unknown hashes to a log for later analysis."""
     import json
     from datetime import datetime, timezone
     from pathlib import Path
@@ -302,28 +308,22 @@ def _append_missing_hash(
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
     except Exception:
-        # Avoid breaking capture flow if logging fails
         pass
 
 def lookup_map_info(dhash: str) -> MapInfo:
-    """
-    Look up map metadata from dhash.
-    Returns MapInfo or a fallback if not found.
-    """
+    """Return map metadata for a hash using exact or fuzzy matching."""
     import logging
+
     logger = logging.getLogger(__name__)
 
-    # Try exact match first
     if dhash in ALL_MAPS:
-        logger.debug(f"Exact hash match: {dhash}")
+        logger.debug("Exact hash match: %s", dhash)
         return ALL_MAPS[dhash]
 
-    # Try to find closest match (hamming distance)
-    # This helps with slight image variations
     tolerance = 42
     best_match = None
-    best_distance = float('inf')
-    closest_distance = float('inf')
+    best_distance = float("inf")
+    closest_distance = float("inf")
     closest_hash = None
     closest_map_id = None
     closest_info = None
@@ -336,53 +336,56 @@ def lookup_map_info(dhash: str) -> MapInfo:
             closest_map_id = info.map_id
             closest_info = info
 
-    if closest_info is not None:
-        if closest_distance <= tolerance:
-            best_distance = closest_distance
-            best_match = closest_info
+    if closest_info is not None and closest_distance <= tolerance:
+        best_distance = closest_distance
+        best_match = closest_info
 
     if best_match:
         logger.info(
-            f"Fuzzy hash match: {best_match.display_name} (distance: {best_distance})")
+            "Fuzzy hash match: %s (distance: %s)",
+            best_match.display_name,
+            best_distance,
+        )
     else:
         logger.warning(
-            f"No hash match found for: {dhash} ({len(dhash)} chars)")
-        closest_value = None if closest_distance == float('inf') else int(closest_distance)
+            "No hash match found for: %s (%s chars)",
+            dhash,
+            len(dhash),
+        )
+        closest_value = (
+            None if closest_distance == float("inf") else int(closest_distance)
+        )
         _append_missing_hash(dhash, closest_value, closest_hash, closest_map_id)
-        # Log a sample known hash for comparison
         sample_hash = list(ALL_MAPS.keys())[0]
         logger.warning(
-            f"Sample known hash: {sample_hash} ({len(sample_hash)} chars)")
+            "Sample known hash: %s (%s chars)",
+            sample_hash,
+            len(sample_hash),
+        )
 
     return best_match or UNKNOWN_MAP_INFO
 
 
 def lookup_map_name(dhash: str, context: Optional[str] = None) -> str:
-    """
-    Look up map name from dhash.
-    Returns the display name or 'Unknown Map' if not found.
-    """
+    """Return the display name for a map hash."""
     return lookup_map_info(dhash).display_name
 
 
 def _hamming_distance(hash1: str, hash2: str) -> int:
-    """Calculate hamming distance between two hex hashes."""
-    # Handle length mismatch by padding shorter one
+    """Calculate the Hamming distance between two hex hashes."""
     if len(hash1) != len(hash2):
         max_len = max(len(hash1), len(hash2))
-        hash1 = hash1.ljust(max_len, '0')
-        hash2 = hash2.ljust(max_len, '0')
+        hash1 = hash1.ljust(max_len, "0")
+        hash2 = hash2.ljust(max_len, "0")
 
     distance = 0
     for c1, c2 in zip(hash1, hash2):
         try:
-            # Convert hex chars to int and XOR
             b1 = int(c1, 16)
             b2 = int(c2, 16)
             xor = b1 ^ b2
-            # Count bits
-            distance += bin(xor).count('1')
+            distance += bin(xor).count("1")
         except ValueError:
-            distance += 4  # Max difference for invalid chars
+            distance += 4
 
     return distance

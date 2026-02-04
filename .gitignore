@@ -10,3 +10,4 @@ logs/
 .vscode/
 *.sqlite3
 coverage/
+/.github

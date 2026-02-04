@@ -25,6 +25,7 @@ AIR_MAPS = {
     "15ee03fc1ff41ec8be666cc5d379e73517188c68dea2bc373878ca368": MapInfo(map_id="air_africa_desert_map", display_name="✈️ Africa Desert", battle_type=BattleType.AIR),
     "766d989f56368aece619d13226548d001a5049f0a7616dc627c20d008": MapInfo(map_id="air_denmark_map", display_name="✈️ Denmark", battle_type=BattleType.AIR),
     "84b881b90df00ff01fc817c41f01bc01e281c8a7e2ac41280900080c0": MapInfo(map_id="air_equatorial_island_map", display_name="✈️ Equatorial Island", battle_type=BattleType.AIR),
+    "2eba056c2f7ca693662cc45108e89cd0df40ff016306c08c92190d1a0": MapInfo(map_id="air_falklands_map", display_name="✈️ Falklands", battle_type=BattleType.AIR),
     "33eca388d30193c3924790b780fd14d593ad69ced193e26387070a0c0": MapInfo(map_id="air_grand_canyon_map", display_name="✈️ Grand Canyon", battle_type=BattleType.AIR),
     "50465019202400c101010542408043818e019c83090e34884110c30c8": MapInfo(map_id="air_israel_map", display_name="✈️ Israel", battle_type=BattleType.AIR),
     "6e07bca6e1d3c6229c263448a892d1632706941cf01fc09e03b206588": MapInfo(map_id="air_kamchatka_map", display_name="✈️ Kamchatka", battle_type=BattleType.AIR),
@@ -282,7 +283,6 @@ def _append_missing_hash(
     best_distance: Optional[int],
     closest_hash: Optional[str],
     closest_map_id: Optional[str],
-    context: Optional[str],
 ) -> None:
     import json
     from datetime import datetime, timezone
@@ -298,7 +298,6 @@ def _append_missing_hash(
             "best_distance": best_distance,
             "closest_hash": closest_hash,
             "closest_map_id": closest_map_id,
-            "context": context,
         }
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
@@ -306,7 +305,7 @@ def _append_missing_hash(
         # Avoid breaking capture flow if logging fails
         pass
 
-def lookup_map_info(dhash: str, context: Optional[str] = None) -> MapInfo:
+def lookup_map_info(dhash: str) -> MapInfo:
     """
     Look up map metadata from dhash.
     Returns MapInfo or a fallback if not found.
@@ -349,7 +348,7 @@ def lookup_map_info(dhash: str, context: Optional[str] = None) -> MapInfo:
         logger.warning(
             f"No hash match found for: {dhash} ({len(dhash)} chars)")
         closest_value = None if closest_distance == float('inf') else int(closest_distance)
-        _append_missing_hash(dhash, closest_value, closest_hash, closest_map_id, context)
+        _append_missing_hash(dhash, closest_value, closest_hash, closest_map_id)
         # Log a sample known hash for comparison
         sample_hash = list(ALL_MAPS.keys())[0]
         logger.warning(
@@ -363,7 +362,7 @@ def lookup_map_name(dhash: str, context: Optional[str] = None) -> str:
     Look up map name from dhash.
     Returns the display name or 'Unknown Map' if not found.
     """
-    return lookup_map_info(dhash, context=context).display_name
+    return lookup_map_info(dhash).display_name
 
 
 def _hamming_distance(hash1: str, hash2: str) -> int:

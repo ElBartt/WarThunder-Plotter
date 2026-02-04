@@ -159,7 +159,7 @@ class Capturer:
                 base_context = "ground"
                 if self.current_map_info:
                     base_context = self.current_map_info.battle_type.value
-                hash_map_info = lookup_map_info(current_map_hash, context=base_context)
+                hash_map_info = lookup_map_info(current_map_hash)
                 if hash_map_info.display_name == "No Map" or hash_map_info.map_id == "no_map":
                     # Map changed to "No Map" - match has ended
                     logger.info("Map changed to 'No Map', ending match")
@@ -275,7 +275,7 @@ class Capturer:
                 map_image = resp.content
                 map_hash = self._compute_dhash(map_image)
                 # Use dhash lookup to get readable map metadata (like WT-Plotter)
-                map_info = lookup_map_info(map_hash, context="ground")
+                map_info = lookup_map_info(map_hash)
                 map_name = map_info.display_name
                 map_id = map_info.map_id
                 battle_type = map_info.battle_type.value
@@ -532,12 +532,7 @@ class Capturer:
         if map_hash == self.current_map_hash:
             return
 
-        air_context = "air"
-        if self.current_map_info.battle_type == BattleType.GROUND:
-            air_context = "air_in_ground"
-        elif self.current_map_info.battle_type == BattleType.NAVAL:
-            air_context = "air_in_naval"
-        air_info = lookup_map_info(map_hash, context=air_context)
+        air_info = lookup_map_info(map_hash)
         if map_image:
             self._save_map_image(map_image, air_info.map_id, map_hash)
 

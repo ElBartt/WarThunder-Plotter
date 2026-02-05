@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional
 
+from config import HASH_SETTINGS, MAP_DEFAULTS, PATHS
+
 
 class BattleType(str, Enum):
     """Supported battle type categories for map metadata."""
@@ -280,7 +282,13 @@ ALL_MAPS = {
     **UNKNOWN_MAPS,
 }
 
-UNKNOWN_MAP_INFO = MapInfo(map_id="unknown", display_name="Unknown Map", battle_type=BattleType.UNKNOWN)
+_LOOKUP_CACHE: Dict[str, MapInfo] = {}
+
+UNKNOWN_MAP_INFO = MapInfo(
+    map_id=MAP_DEFAULTS.unknown_map_id,
+    display_name=MAP_DEFAULTS.unknown_map_name,
+    battle_type=BattleType.UNKNOWN,
+)
 
 
 def _append_missing_hash(
@@ -292,10 +300,9 @@ def _append_missing_hash(
     """Persist unknown hashes to a log for later analysis."""
     import json
     from datetime import datetime, timezone
-    from pathlib import Path
 
     try:
-        log_path = Path(__file__).resolve().parent / "data" / "missing_map_hashes.log"
+        log_path = PATHS.missing_hash_log
         log_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "time": datetime.now(timezone.utc).isoformat(),
@@ -316,11 +323,16 @@ def lookup_map_info(dhash: str) -> MapInfo:
 
     logger = logging.getLogger(__name__)
 
+    cached = _LOOKUP_CACHE.get(dhash)
+    if cached is not None:
+        return cached
+
     if dhash in ALL_MAPS:
         logger.debug("Exact hash match: %s", dhash)
+        _LOOKUP_CACHE[dhash] = ALL_MAPS[dhash]
         return ALL_MAPS[dhash]
 
-    tolerance = 42
+    tolerance = HASH_SETTINGS.tolerance
     best_match = None
     best_distance = float("inf")
     closest_distance = float("inf")
@@ -363,7 +375,9 @@ def lookup_map_info(dhash: str) -> MapInfo:
             len(sample_hash),
         )
 
-    return best_match or UNKNOWN_MAP_INFO
+    resolved = best_match or UNKNOWN_MAP_INFO
+    _LOOKUP_CACHE[dhash] = resolved
+    return resolved
 
 
 def lookup_map_name(dhash: str, context: Optional[str] = None) -> str:

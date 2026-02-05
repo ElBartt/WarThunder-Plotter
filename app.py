@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from pathlib import Path
 import sqlite3
 from typing import Any, Dict, Optional
 
@@ -15,7 +14,9 @@ from flask import Flask, Response, jsonify, render_template, request
 
 import capture
 import db
+from config import APP_SETTINGS, CAPTURE_DEFAULTS, MAP_DEFAULTS, PATHS
 from map_hashes import MapInfo, UNKNOWN_MAP_INFO, lookup_map_info
+from models import MatchDetailPayload, MatchListPayload, MatchSummaryPayload
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MAPS_DIR = Path(__file__).parent / "data" / "maps"
+MAPS_DIR = PATHS.maps_dir
 
 
 def _resolve_map_info(map_hash: Optional[str]) -> MapInfo:
@@ -41,7 +42,7 @@ def _format_datetime(value: Optional[str]) -> str:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return value
-    return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    return parsed.strftime(APP_SETTINGS.datetime_format)
 
 
 def _calculate_duration_seconds(match: db.Match) -> Optional[int]:
@@ -69,18 +70,16 @@ def _build_match_summary(
     air_info = (
         _resolve_map_info(match.air_map_hash) if match.air_map_hash else None
     )
-    return {
-        "id": match.id,
-        "started_at": match.started_at,
-        "ended_at": match.ended_at,
-        "map_name": map_info.display_name,
-        "air_map_name": air_info.display_name if air_info else None,
-        "nuke_detected": getattr(match, "nuke_detected", 0),
-        "initial_capture_count": getattr(match, "initial_capture_count", None),
-        "duration_seconds": _calculate_duration_seconds(match),
-        "position_count": db.get_positions_count(conn, match.id),
-        "is_active": match.ended_at is None,
-    }
+    position_count = db.get_positions_count(conn, match.id)
+    duration_seconds = _calculate_duration_seconds(match)
+    payload = MatchSummaryPayload.from_match(
+        match,
+        map_info,
+        air_info,
+        position_count,
+        duration_seconds,
+    )
+    return payload.to_dict()
 
 
 def _build_match_payload(
@@ -89,41 +88,16 @@ def _build_match_payload(
 ) -> Dict[str, Any]:
     """Build the API payload for listing matches."""
     map_info = _resolve_map_info(match.map_hash)
-    return {
-        "id": match.id,
-        "started_at": match.started_at,
-        "ended_at": match.ended_at,
-        "map_name": map_info.display_name,
-        "map_id": map_info.map_id,
-        "battle_type": map_info.battle_type.value,
-        "nuke_detected": getattr(match, "nuke_detected", 0),
-        "initial_capture_count": getattr(match, "initial_capture_count", None),
-        "initial_capture_x": getattr(match, "initial_capture_x", None),
-        "initial_capture_y": getattr(match, "initial_capture_y", None),
-        "position_count": db.get_positions_count(conn, match.id),
-    }
+    position_count = db.get_positions_count(conn, match.id)
+    payload = MatchListPayload.from_match(match, map_info, position_count)
+    return payload.to_dict()
 
 
 def _build_match_detail_payload(match: db.Match) -> Dict[str, Any]:
     """Build the API payload for a single match."""
     map_info = _resolve_map_info(match.map_hash)
-    return {
-        "id": match.id,
-        "started_at": match.started_at,
-        "ended_at": match.ended_at,
-        "map_name": map_info.display_name,
-        "map_hash": match.map_hash,
-        "map_id": map_info.map_id,
-        "battle_type": map_info.battle_type.value,
-        "nuke_detected": getattr(match, "nuke_detected", 0),
-        "initial_capture_count": getattr(match, "initial_capture_count", None),
-        "initial_capture_x": getattr(match, "initial_capture_x", None),
-        "initial_capture_y": getattr(match, "initial_capture_y", None),
-        "air_transform_a": getattr(match, "air_transform_a", None),
-        "air_transform_b": getattr(match, "air_transform_b", None),
-        "air_transform_c": getattr(match, "air_transform_c", None),
-        "air_transform_d": getattr(match, "air_transform_d", None),
-    }
+    payload = MatchDetailPayload.from_match(match, map_info)
+    return payload.to_dict()
 
 
 def _parse_since_ms(raw_value: Any) -> int:
@@ -136,7 +110,7 @@ def _parse_since_ms(raw_value: Any) -> int:
 def _select_map_key(map_info: MapInfo, map_hash: str) -> Optional[str]:
     """Resolve the map image key for image lookups."""
     map_id = map_info.map_id
-    if map_id in (None, "", "unknown", "no_map"):
+    if map_id in (None, *MAP_DEFAULTS.invalid_map_ids):
         return map_hash or None
     return map_id
 
@@ -236,8 +210,8 @@ def _register_routes(app: Flask, conn: sqlite3.Connection) -> None:
         """Return capture status metadata."""
         capturer = capture.get_capturer()
         active = db.get_active_match(conn)
-        army_type = getattr(capturer, "current_army_type", "tank")
-        vehicle_type = getattr(capturer, "current_vehicle_type", "")
+        army_type = getattr(capturer, "current_army_type", CAPTURE_DEFAULTS.army_type)
+        vehicle_type = getattr(capturer, "current_vehicle_type", CAPTURE_DEFAULTS.vehicle_type)
         if active and (not army_type or not vehicle_type):
             latest_tick = db.get_latest_tick(conn, active.id)
             if latest_tick:
@@ -247,8 +221,8 @@ def _register_routes(app: Flask, conn: sqlite3.Connection) -> None:
             {
                 "capturing": capturer.running,
                 "active_match_id": active.id if active else None,
-                "army_type": army_type or "tank",
-                "vehicle_type": vehicle_type or "",
+                "army_type": army_type or CAPTURE_DEFAULTS.army_type,
+                "vehicle_type": vehicle_type or CAPTURE_DEFAULTS.vehicle_type,
             }
         )
 
@@ -286,8 +260,8 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--port", default=5000, help="Port to run the server on")
-@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=APP_SETTINGS.port, help="Port to run the server on")
+@click.option("--host", default=APP_SETTINGS.host, help="Host to bind to")
 def serve(port: int, host: str) -> None:
     """Start the web server only (no capture)."""
     app = create_app()
@@ -328,8 +302,8 @@ def capture_cmd() -> None:
 
 
 @cli.command()
-@click.option("--port", default=5000, help="Port to run the server on")
-@click.option("--host", default="127.0.0.1", help="Host to bind to")
+@click.option("--port", default=APP_SETTINGS.port, help="Port to run the server on")
+@click.option("--host", default=APP_SETTINGS.host, help="Host to bind to")
 def watch(port: int, host: str) -> None:
     """Start both capture and web server."""
     logger.info("Starting watch mode (capture + web server)")

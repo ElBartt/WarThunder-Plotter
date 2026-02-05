@@ -8,11 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 import logging
-from pathlib import Path
 import sqlite3
 from typing import Dict, List, Optional
 
-DB_PATH = Path(__file__).parent / "data" / "matches.db"
+from config import DB_SETTINGS, PATHS
+
+DB_PATH = PATHS.db_path
 
 _ENUM_TABLES = {
     "enum_colors": "color",
@@ -108,12 +109,8 @@ def get_connection() -> sqlite3.Connection:
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
     """Apply SQLite PRAGMA settings for better performance and integrity."""
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA temp_store = MEMORY")
-    conn.execute("PRAGMA auto_vacuum = INCREMENTAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
+    for key, value in DB_SETTINGS.pragmas.items():
+        conn.execute(f"PRAGMA {key} = {value}")
 
 
 def _ensure_enum_value(
@@ -145,7 +142,7 @@ def _quantize_coord(value: Optional[float]) -> Optional[float]:
     """Quantize coordinates for consistent storage precision."""
     if value is None:
         return None
-    return round(float(value), 5)
+    return round(float(value), DB_SETTINGS.position_precision)
 
 
 def _to_timestamp_ms(seconds: float) -> int:
@@ -304,8 +301,8 @@ def update_match_initial_capture(
            WHERE id = ?""",
         (
             initial_capture_count,
-            round(float(initial_capture_x), 6),
-            round(float(initial_capture_y), 6),
+            round(float(initial_capture_x), DB_SETTINGS.capture_precision),
+            round(float(initial_capture_y), DB_SETTINGS.capture_precision),
             match_id
         )
     )

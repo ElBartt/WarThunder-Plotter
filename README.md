@@ -35,22 +35,13 @@ WarThunder Plotter is a Python-based application that captures player positions 
 
 2. **Create a virtual environment** (recommended):
    ```bash
-   python -m venv .venv
-   # On Windows:
-   .venv\Scripts\activate
-   # On macOS/Linux:
-   source .venv/bin/activate
+   setup_offline_plotter.bat
    ```
 
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Run the setup script** (optional, for offline plotting):
+3. **Run the setup script** (optional, for offline plotting):
    ```bash
    # Windows
-   setup_offline_plotter.bat
+   run_watch.bat
    ```
 
 ## 🎮 Usage
@@ -97,7 +88,7 @@ python app.py watch --port 5000 --host 127.0.0.1
 
 - `data/matches.db`: SQLite database storing matches and positions
 - `data/maps/`: Directory containing map images (downloaded once per map)
-- Map images are cached locally for performance
+- Map images are cached locally for performance and reusability
 
 ## 🌟 Key Features Explained
 

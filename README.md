@@ -8,6 +8,11 @@
 
 WarThunder Plotter is a Python-based application that captures player positions in real-time during War Thunder matches via the game's local API (localhost:8111) and provides a web interface to visualize and analyze match data offline.
 
+## ⚠️ Notes
+
+- The tool captures live data only - it does not read replay files
+- No personnal data is collected or stored; only match positions and metadata, everything is anonymous, I don't even know your nickname or account ID.
+
 ## ✨ Features
 
 - 🎯 **Real-time Capture**: Automatically detects and records match positions
@@ -191,19 +196,16 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## ⚠️ Notes
-
-- The tool captures live data only - it does not read replay files
-- Requires War Thunder to be running with the local API enabled
-- Map grouping considers battle mode (ground/air)
-- When switching from ground to air during a match, air map data is stored as secondary metadata
-
 ## 🙏 Acknowledgments
 
 - Built for the War Thunder community
 - Uses Flask for the web framework
 - SQLite for data storage
 - Pillow for image processing
+
+Thanks to [SGambe33](https://github.com/Sgambe33/WT-Plotter) for the groundwork on War Thunder plotting! I discovered this project after starting mine, and it inspired me to create this enhanced version with replayability and a modern web interface. (Thanks for map's hashes too!)
+
+Thanks to [ValerieOSD](https://github.com/ValerieOSD/WarThunderRPC) for clean open source code that helped me making this project possible.
 
 ---
 

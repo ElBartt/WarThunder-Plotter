@@ -3,9 +3,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import sys
 from typing import Mapping, Tuple
 
-BASE_DIR = Path(__file__).parent
+def _resolve_base_dir() -> Path:
+    """Return the base directory for runtime data and assets."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+BASE_DIR = _resolve_base_dir()
 DATA_DIR = BASE_DIR / "data"
 
 
@@ -27,6 +35,7 @@ class AppSettings:
     host: str = "127.0.0.1"
     port: int = 5000
     datetime_format: str = "%Y-%m-%d %H:%M:%S"
+    open_browser_on_start: bool = True
 
 
 @dataclass(frozen=True)

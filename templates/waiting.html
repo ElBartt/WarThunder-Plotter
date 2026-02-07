@@ -12,6 +12,7 @@
         <nav>
             <a href="/">Matches</a>
             <a href="/live">Live</a>
+            <button class="btn btn-danger" onclick="shutdownApp()" title="Quit application">Quit</button>
         </nav>
     </header>
     
@@ -25,6 +26,14 @@
     </div>
     
     <script>
+        async function shutdownApp() {
+            if (!confirm('Quit WT Plotter?')) return;
+            try {
+                await fetch('/shutdown', { method: 'POST' });
+            } catch (e) {}
+            setTimeout(() => { window.close(); }, 500);
+        }
+
         // Poll for active match
         setInterval(async () => {
             try {

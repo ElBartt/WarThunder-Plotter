@@ -12,6 +12,7 @@
         <nav>
             <a href="/">Matches</a>
             <a href="/live">Live</a>
+            <button class="btn btn-danger" onclick="shutdownApp()" title="Quit application">Quit</button>
         </nav>
     </header>
     
@@ -145,6 +146,14 @@
     
     <script src="{{ url_for('static', filename='viewer.js') }}"></script>
     <script>
+        async function shutdownApp() {
+            if (!confirm('Quit WT Plotter?')) return;
+            try {
+                await fetch('/shutdown', { method: 'POST' });
+            } catch (e) {}
+            setTimeout(() => { window.close(); }, 500);
+        }
+
         const viewer = new MatchViewer('mapCanvas', {{ match.id }}, {
             isLive: {{ 'true' if is_live else 'false' }},
             pollInterval: 500  // 0.5 second

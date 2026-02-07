@@ -12,6 +12,7 @@
         <nav>
             <a href="/">Matches</a>
             <a href="/live">Live</a>
+            <button class="btn btn-danger" onclick="shutdownApp()" title="Quit application">Quit</button>
         </nav>
     </header>
     
@@ -70,6 +71,15 @@
     </div>
     
     <script>
+        async function shutdownApp() {
+            if (!confirm('Quit WT Plotter?')) return;
+            try {
+                await fetch('/shutdown', { method: 'POST' });
+            } catch (e) {}
+            // Give the server a moment to stop
+            setTimeout(() => { window.close(); }, 500);
+        }
+
         async function deleteMatch(matchId, mapName) {
             if (!confirm(`Delete match on "${mapName}"?\n\nThis will permanently remove all recorded positions.`)) {
                 return;

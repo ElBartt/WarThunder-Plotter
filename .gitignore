@@ -12,3 +12,6 @@ logs/
 *.sqlite3
 coverage/
 /.github
+/build
+/dist
+/WarThunderPlotter.spec

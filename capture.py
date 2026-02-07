@@ -993,6 +993,12 @@ def get_capturer() -> Capturer:
     return _capturer
 
 
+def set_capturer(instance: Capturer) -> None:
+    """Set the global capturer instance (for app lifecycle control)."""
+    global _capturer
+    _capturer = instance
+
+
 def start_capture() -> None:
     """Start capturing."""
     get_capturer().start()

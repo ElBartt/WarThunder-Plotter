@@ -8,6 +8,9 @@ from datetime import datetime
 import logging
 import sqlite3
 from typing import Any, Dict, Optional
+import os
+import webbrowser
+import requests
 
 import click
 from flask import Flask, Response, jsonify, render_template, request
@@ -17,6 +20,8 @@ import db
 from config import APP_SETTINGS, CAPTURE_DEFAULTS, MAP_DEFAULTS, PATHS
 from map_hashes import MapInfo, UNKNOWN_MAP_INFO, lookup_map_info
 from models import MatchDetailPayload, MatchListPayload, MatchSummaryPayload
+from updater import check_and_update_on_start
+import tray
 
 logging.basicConfig(
     level=logging.INFO,
@@ -238,6 +243,23 @@ def _register_routes(app: Flask, conn: sqlite3.Connection) -> None:
         db.delete_match(conn, match_id)
         return jsonify({"success": True})
 
+    @app.route("/shutdown", methods=["POST"])
+    def shutdown():
+        """Gracefully stop capture and shut down the web server."""
+        try:
+            try:
+                capture.stop_capture()
+            except Exception:
+                pass
+            func = request.environ.get("werkzeug.server.shutdown")
+            if func is not None:
+                func()
+            else:
+                os._exit(0)
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
 
 def create_app() -> Flask:
     """Create and configure the Flask application."""
@@ -254,9 +276,33 @@ def create_app() -> Flask:
     return app
 
 
-@click.group()
-def cli() -> None:
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx: click.Context) -> None:
     """WT Plotter - War Thunder match visualizer."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(watch, port=APP_SETTINGS.port, host=APP_SETTINGS.host)
+
+
+def _maybe_open_browser(host: str, port: int, path: str = "") -> None:
+    """Open the local web UI when enabled in settings."""
+    if not APP_SETTINGS.open_browser_on_start:
+        return
+    suffix = f"/{path.lstrip('/')}" if path else ""
+    url = f"http://{host}:{port}{suffix}"
+    try:
+        webbrowser.open(url)
+    except Exception:
+        logger.debug("Failed to open browser for %s", url)
+
+
+def _another_instance_running(host: str, port: int) -> bool:
+    """Return True if a WT Plotter server is already reachable."""
+    try:
+        resp = requests.get(f"http://{host}:{port}/api/status", timeout=1.0)
+        return resp.ok
+    except Exception:
+        return False
 
 
 @cli.command()
@@ -266,7 +312,16 @@ def serve(port: int, host: str) -> None:
     """Start the web server only (no capture)."""
     app = create_app()
     logger.info("Starting web server on http://%s:%s", host, port)
+    _maybe_open_browser(host, port)
+    try:
+        tray.start_tray(host, port)
+    except Exception:
+        logger.debug("Tray failed to start")
     app.run(host=host, port=port, debug=False, threaded=True)
+    try:
+        tray.stop_tray()
+    except Exception:
+        pass
 
 
 @cli.command("capture")
@@ -289,6 +344,10 @@ def capture_cmd() -> None:
         on_match_end=on_end,
         on_position=on_position,
     )
+    try:
+        capture.set_capturer(capturer)
+    except Exception:
+        pass
 
     try:
         capturer.start()
@@ -324,20 +383,38 @@ def watch(port: int, host: str) -> None:
         on_match_end=on_end,
         on_position=on_position,
     )
+    try:
+        capture.set_capturer(capturer)
+    except Exception:
+        pass
     capturer.start()
 
     app = create_app()
     logger.info("Web server: http://%s:%s", host, port)
     logger.info("Live view: http://%s:%s/live", host, port)
+    _maybe_open_browser(host, port, "live")
+    try:
+        tray.start_tray(host, port)
+    except Exception:
+        logger.debug("Tray failed to start")
 
     try:
         app.run(host=host, port=port, debug=False, threaded=True)
     finally:
         capturer.stop()
+        try:
+            tray.stop_tray()
+        except Exception:
+            pass
 
 
 def main() -> None:
     """Run the CLI entrypoint."""
+    check_and_update_on_start()
+    # Single-instance guard: if another instance is serving, just open it and exit
+    if _another_instance_running(APP_SETTINGS.host, APP_SETTINGS.port):
+        _maybe_open_browser(APP_SETTINGS.host, APP_SETTINGS.port, "live")
+        return
     cli()
 
 

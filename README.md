@@ -44,6 +44,47 @@ WarThunder Plotter is a Python-based application that captures player positions 
    run_watch.bat
    ```
 
+## 📦 Windows Portable (No Python Needed)
+
+If you just want a double-clickable app, download the portable EXE from GitHub Releases:
+
+1. Go to the latest release on GitHub.
+2. Download `WarThunderPlotter-portable.exe`.
+3. Double-click it. The app starts in watch mode and opens your browser.
+
+All data (database + maps) is stored next to the EXE in the `data/` folder.
+
+### System Tray + Instance Unique
+
+- Un icône s’affiche dans la zone de notification Windows avec les actions:
+   - Open: ouvre l’interface web locale
+   - Quit: arrête proprement la capture et le serveur
+- Instance unique: si l’app est déjà lancée, un nouveau double-clic n’ouvre que le navigateur et se termine immédiatement (pas de deuxième instance, pas de corruption DB).
+
+## 🔄 Auto-Update (GitHub Releases)
+
+The portable EXE checks GitHub Releases on startup. If a newer version exists,
+it downloads the new EXE and swaps it automatically, then restarts.
+
+To disable updates, set the environment variable:
+
+```bash
+WT_PLOTTER_SKIP_UPDATE=1
+```
+
+## 🛠️ Build the Windows EXE (for maintainers)
+
+```bash
+build_windows.bat
+```
+
+Release flow:
+
+1. Update `version.py` (e.g., `0.2.0`).
+2. Build the EXE.
+3. Create a GitHub Release tag `v0.2.0`.
+4. Upload `dist/WarThunderPlotter-portable.exe` to the release assets.
+
 ## 🎮 Usage
 
 ### Quick Start

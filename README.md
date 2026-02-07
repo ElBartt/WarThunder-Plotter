@@ -19,6 +19,44 @@ WarThunder Plotter is a Python-based application that captures player positions 
 - 🗑️ **Data Management**: Delete old matches and manage storage
 - 📱 **Responsive Design**: Works on desktop and mobile devices
 
+## WTHM (Central Aggregation)
+
+This repository now includes a minimal central ingestion server and client-side sync to aggregate matches from multiple users.
+
+- Client sync: when a match ends, an envelope (schema v1) is posted to the central server.
+- Server (Flask): receives `/ingest` and stores the match, ticks, and positions into the same schema.
+
+### Enable client sync
+
+Edit `config.py` and set:
+
+- `SYNC_SETTINGS.enabled = True`
+- `SYNC_SETTINGS.server_url = "http://localhost:8000"` (or your VPS URL)
+- Optionally set `auth_token` and `client_id`.
+
+### Run the ingestion server locally
+
+```
+python wthm_server/app.py
+```
+
+The server exposes `POST /ingest` and `GET /health`.
+
+### Envelope Schema (v1)
+
+- `schema_version`: integer (currently `1`)
+- `client_id`: optional identifier of the sender
+- `match`: match detail payload compatible with existing viewer
+- `ticks`: array of `{id, timestamp (ms), army_type, vehicle_type, is_player_air, is_player_air_view}`
+- `positions`: array of `{tick_id, x, y, color, type, icon, is_poi, x_ground, y_ground}`
+
+The server expands these into the central DB using the same tables and enums.
+
+### Notes on maintainability
+
+- The ingestion is schema-versioned via `schema_version`.
+- Server validation is minimal and avoids application logic; it centralizes data only.
+- Future schema changes can be coordinated by bumping `SYNC_SETTINGS.schema_version` and updating the server to accept the new structure.
 ## 📋 Requirements
 
 - **Python**: 3.8 or higher

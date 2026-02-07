@@ -15,6 +15,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import capture
 import db
 from config import APP_SETTINGS, CAPTURE_DEFAULTS, MAP_DEFAULTS, PATHS
+import sync
 from map_hashes import MapInfo, UNKNOWN_MAP_INFO, lookup_map_info
 from models import MatchDetailPayload, MatchListPayload, MatchSummaryPayload
 
@@ -280,6 +281,11 @@ def capture_cmd() -> None:
 
     def on_end(match_id: int) -> None:
         logger.info("Match %s ended", match_id)
+        # Send to central WTHM server if enabled
+        try:
+            sync.sync_match(capturer.conn, match_id)
+        except Exception as e:
+            logger.warning("Remote sync failed for match %s: %s", match_id, e)
 
     def on_position(match_id: int, positions: list[dict]) -> None:
         logger.info("Match %s: captured %s positions", match_id, len(positions))
@@ -313,6 +319,11 @@ def watch(port: int, host: str) -> None:
 
     def on_end(match_id: int) -> None:
         logger.info("Match %s ended", match_id)
+        # Send to central WTHM server if enabled
+        try:
+            sync.sync_match(capturer.conn, match_id)
+        except Exception as e:
+            logger.warning("Remote sync failed for match %s: %s", match_id, e)
 
     def on_position(match_id: int, positions: list[dict]) -> None:
         regular = [pos for pos in positions if not pos.get("is_poi")]

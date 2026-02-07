@@ -155,6 +155,20 @@ class DbSettings:
     capture_precision: int = 6
 
 
+@dataclass(frozen=True)
+class SyncSettings:
+    """Remote sync configuration for central aggregation (WTHM)."""
+
+    enabled: bool = False
+    server_url: str = "http://localhost:8000"
+    ingest_path: str = "/ingest"
+    auth_token: str = ""
+    client_id: str = ""
+    schema_version: int = 1
+    timeout: float = 5.0
+    retries: int = 2
+
+
 PATHS = PathSettings()
 APP_SETTINGS = AppSettings()
 MAP_DEFAULTS = MapDefaults()
@@ -166,3 +180,4 @@ CAPTURE_TIMEOUTS = CaptureTimeouts()
 TRANSFORM_SETTINGS = TransformSettings()
 HASH_SETTINGS = HashSettings()
 DB_SETTINGS = DbSettings()
+SYNC_SETTINGS = SyncSettings()
